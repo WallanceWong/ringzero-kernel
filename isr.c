@@ -41,6 +41,10 @@ static const char scancode_ascii[128] = {
 };
 
 static volatile unsigned int ticks = 0;
+unsigned int timer_ticks(void)
+{
+    return ticks;
+}
 
 void interrupt_handler(struct cpu_state *s)
 {

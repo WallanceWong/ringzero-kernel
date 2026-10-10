@@ -18,6 +18,7 @@ void gfx_draw_string(unsigned int x, unsigned int y, const char *s, unsigned int
 int kb_pop(void);
 void sensor_feed(char c);
 void gfx_putc(char c);
+unsigned int timer_ticks(void);
 
 int kmain(unsigned int *mbi)
 {
