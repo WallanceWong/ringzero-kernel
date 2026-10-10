@@ -21,9 +21,19 @@ void gfx_put_pixel(unsigned int x, unsigned int y, unsigned int color)
 void gfx_fill_rect(unsigned int x, unsigned int y,
                    unsigned int w, unsigned int h, unsigned int color)
 {
-    for (unsigned int j = 0; j < h; j++)
-        for (unsigned int i = 0; i < w; i++)
-            gfx_put_pixel(x + i, y + j, color);
+    if (x >= fb_w || y >= fb_h)
+        return;
+    if (x + w > fb_w)
+        w = fb_w - x;
+    if (y + h > fb_h)
+        h = fb_h - y;
+
+    for (unsigned int row = 0; row < h; row++) {
+        volatile unsigned int *p =
+            (volatile unsigned int *)(fb_addr + (y + row) * fb_pitch + x * 4);
+        for (unsigned int col = 0; col < w; col++)
+            p[col] = color;
+    }
 }
 
 void gfx_draw_char(unsigned int x, unsigned int y, char c,
