@@ -24,6 +24,7 @@ To boot on real hardware, write `os.iso` to a USB stick and boot it in Legacy/CS
 | Timer (100 Hz PIT) | 61 ticks in 61 s | on-screen square flips every 1.00 s (10 s sample, within 0.3%) |
 | Full-screen 800x600 fill | 26.7 ms per-pixel, 2.4 ms with row writes | not measured |
 | PC speaker | audible (QEMU audio) | no sound at all: this laptop has no usable PC speaker path |
+| USB keyboard | not tested | works (legacy USB emulation) |
 
 ## Credits
 - Follows *The Little Book about OS Development* by Erik Helin and Adam Renberg (kernel structure and early chapters).
