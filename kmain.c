@@ -28,7 +28,7 @@ int kmain(unsigned int *mbi)
     gfx_init(mbi);
     gfx_fill_rect(0, 0, 800, 600, 0x00101820);       /* dark background */
     gfx_fill_rect(100, 100, 200, 100, 0x00FF0000);   /* red rectangle */
-    gfx_draw_string(100, 220, "A1-37 VIGIL", 0x00FFFFFF, 0x00101820);
+    gfx_draw_string(100, 220, "ringzero-kernel", 0x00FFFFFF, 0x00101820);
 
     gdt_init();
     idt_init();
