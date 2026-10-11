@@ -3,7 +3,6 @@
 int serial_write(unsigned short com, char *buf, unsigned int len);
 int fb_write(char *buf, unsigned int len);
 void speaker_off(void);
-extern unsigned int sensor_hr, sensor_spo2, sensor_temp;
 void kb_push(char c);
 
 struct cpu_state {
@@ -21,16 +20,6 @@ struct cpu_state {
     unsigned int cs;
     unsigned int eflags;
 };
-
-static void serial_hex(unsigned char v)
-{
-    char *d = "0123456789ABCDEF";
-    char out[3];
-    out[0] = d[v >> 4];
-    out[1] = d[v & 0x0F];
-    out[2] = ' ';
-    serial_write(0x3F8, out, 3);
-}
 
 static const char scancode_ascii[128] = {
     0,  0, '1','2','3','4','5','6','7','8','9','0', 0, 0, 0, 0,        /* 0x00-0x0F */
@@ -51,8 +40,7 @@ void interrupt_handler(struct cpu_state *s)
     if (s->int_no == 3) {
         serial_write(0x3F8, "int!\n", 5);
     } else if (s->int_no == 33) {
-        unsigned char sc = inb(0x60);
-        serial_hex(sc);
+	unsigned char sc = inb(0x60);
         if (!(sc & 0x80)) {
             char c = scancode_ascii[sc];
             if (c)
