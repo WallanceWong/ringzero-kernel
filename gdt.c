@@ -37,7 +37,6 @@ void gdt_init(void)
     gdt_set_entry(1, 0, 0xFFFFFFFF, 0x9A, 0xCF);            /* kernel code: base, limit */
     gdt_set_entry(2, 0, 0xFFFFFFFF, 0x92, 0xCF);            /* kernel data: base, limit */
 
-    gdt_set_entry(2, 0, 0xFFFFFFFF, 0x92, 0xCF);
     gdt_load(&gp);
 }
 

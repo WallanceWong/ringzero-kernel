@@ -22,8 +22,6 @@ unsigned int timer_ticks(void);
 
 int kmain(unsigned int *mbi)
 {
-    (void)mbi;
-
     serial_init(0x3F8);
     gfx_init(mbi);
     gfx_fill_rect(0, 0, 800, 600, 0x00101820);       /* dark background */
@@ -35,7 +33,6 @@ int kmain(unsigned int *mbi)
     pic_remap();
     pit_init(100);
     outb(0x21, 0xFC);        /* enable timer IRQ0 and keyboard IRQ1 */
-    speaker_on(1000);
     __asm__ volatile ("sti");
 
     for (;;) {

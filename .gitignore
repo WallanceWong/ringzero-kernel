@@ -4,3 +4,4 @@ os.iso
 iso/boot/kernel.elf
 bochslog.txt
 bochsrc.txt
+*.d

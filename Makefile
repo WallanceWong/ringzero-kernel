@@ -1,8 +1,8 @@
 OBJECTS = loader.o kmain.o fb.o io.o serial.o string.o fb_move_cursor.o gdt.o gdt_load.o idt.o idt_load.o interrupt.o isr.o pic.o pit.o speaker.o gfx.o sensor.o kbd.o
 CC = gcc
-CFLAGS = -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector \
--nostartfiles -nodefaultlibs -Wall -Wextra -Werror -c
-LDFLAGS = -T link.ld -melf_i386
+CFLAGS = -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -ffreestanding -MMD -MP \
+         -nostartfiles -nodefaultlibs -Wall -Wextra -Werror -c
+LDFLAGS = -T link.ld -melf_i386 -z noexecstack
 AS = nasm
 ASFLAGS = -f elf
 
@@ -25,6 +25,6 @@ run-iso: os.iso
 	$(AS) $(ASFLAGS) $< -o $@
 
 clean:
-	rm -rf *.o kernel.elf os.iso
-run: kernel.elf
-	qemu-system-i386 -kernel kernel.elf -serial stdio
+	rm -rf *.o *.d kernel.elf os.iso
+
+-include $(OBJECTS:.o=.d)

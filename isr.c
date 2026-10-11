@@ -2,7 +2,6 @@
 
 int serial_write(unsigned short com, char *buf, unsigned int len);
 int fb_write(char *buf, unsigned int len);
-void speaker_off(void);
 void kb_push(char c);
 void gfx_draw_string(unsigned int x, unsigned int y, const char *s, unsigned int fg, unsigned int bg);
 void gfx_fill_rect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int color);
@@ -72,11 +71,7 @@ void interrupt_handler(struct cpu_state *s)
         outb(0x20, 0x20);
     } else if (s->int_no == 32) {
         ticks++;
-        if (ticks % 100 == 0)
-            serial_write(0x3F8, "tick\n", 5);
         outb(0x20, 0x20);
-	if (ticks == 200)
-            speaker_off();
     }
 }
 

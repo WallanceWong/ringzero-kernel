@@ -1,4 +1,4 @@
-KERNEL_STACK_SIZE equ 4096          ; size of stack in bytes
+KERNEL_STACK_SIZE equ 16384          ; size of stack in bytes
 global loader                       ; the entry symbol for ELF
 extern kmain
 

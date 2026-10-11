@@ -3,7 +3,18 @@ static unsigned int fb_addr, fb_pitch, fb_w, fb_h;
 
 void gfx_init(unsigned int *mbi)
 {
-    fb_addr  = mbi[22];     /* the same indexes as in the table above */
+    unsigned char *b = (unsigned char *)mbi;
+
+    fb_addr = fb_pitch = fb_w = fb_h = 0;      /* safe default: draw nothing */
+
+    if (!(mbi[0] & (1 << 12)))               /* framebuffer info valid? */
+        return;
+    if (b[108] != 32)                         /* bits per pixel */
+        return;
+    if (b[109] != 1)                          /* type: direct RGB */
+        return;
+
+    fb_addr  = mbi[22];
     fb_pitch = mbi[24];
     fb_w     = mbi[25];
     fb_h     = mbi[26];
