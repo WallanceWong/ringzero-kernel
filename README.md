@@ -20,7 +20,7 @@ Needs: gcc (32-bit), nasm, ld, grub-mkrescue (with xorriso and mtools), qemu-sys
 To boot on real hardware, write `os.iso` to a USB stick and boot it in Legacy/CSM (BIOS) mode with Secure Boot off.
 
 ## Measurements
-| Test | QEMU | ASUS laptop (real hardware) |
+| Test | QEMU (Virtual Machine) | Real hardware |
 |---|---|---|
 | Timer (100 Hz PIT) | 61 ticks in 61 s | on-screen square flips every 1.00 s (10 s sample, within 0.3%) |
 | Full-screen 800x600 fill | 26.7 ms per-pixel, 2.4 ms with row writes | not measured |
@@ -28,6 +28,6 @@ To boot on real hardware, write `os.iso` to a USB stick and boot it in Legacy/CS
 | USB keyboard | n/a | works (BIOS legacy USB emulation) |
 
 ## Credits and licence
-- This is my project. I built it by following *The Little Book about OS Development* by Erik Helin and Adam Renberg, with an AI assistant (Claude) explaining concepts and suggesting snippets that I typed, adapted, tested and debugged.
+- This is my project. I built it by following *The Little Book about OS Development* by Erik Helin and Adam Renberg.
 - Font: `font.h` is generated from DejaVu Sans Mono Bold, under the Bitstream Vera licence (see `FONT-LICENSE.txt`).
 - The code in this repository is MIT licensed (see `LICENSE`). The font and the book keep their own terms.
