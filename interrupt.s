@@ -59,3 +59,5 @@ no_error_code_handler 30
 no_error_code_handler 31
 no_error_code_handler 32
 no_error_code_handler 33
+no_error_code_handler 39   ; spurious IRQ 7
+no_error_code_handler 47   ; spurious IRQ 15

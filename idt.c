@@ -59,6 +59,8 @@ void interrupt_handler_30(void);
 void interrupt_handler_31(void);
 void interrupt_handler_32(void);
 void interrupt_handler_33(void);
+void interrupt_handler_39(void);
+void interrupt_handler_47(void);
 
 static void (*const exception_stubs[32])(void) = {
     interrupt_handler_0,  interrupt_handler_1,  interrupt_handler_2,  interrupt_handler_3,
@@ -79,6 +81,8 @@ void idt_init(void)
         idt_set_entry(i, (unsigned int)exception_stubs[i]);
     idt_set_entry(32, (unsigned int)interrupt_handler_32);
     idt_set_entry(33, (unsigned int)interrupt_handler_33);
+    idt_set_entry(39, (unsigned int)interrupt_handler_39);   /* spurious IRQ 7 */
+    idt_set_entry(47, (unsigned int)interrupt_handler_47);   /* spurious IRQ 15 */
     idt_load(&ip);   /* load the IDT */
 }
 

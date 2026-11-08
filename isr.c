@@ -61,6 +61,22 @@ void interrupt_handler(struct cpu_state *s)
     if (s->int_no < 32) {
        exception_screen(s);
    }
+
+    /* ── Spurious IRQ 7: real only if the master's in-service bit 7 is set ── */
+    if (s->int_no == 39) {
+        outb(0x20, 0x0B);               /* read master PIC's ISR register */
+        if (!(inb(0x20) & 0x80))
+            return;                     /* fake: no end-of-interrupt */
+    }
+
+    /* ── Spurious IRQ 15: check the slave; the master still needs an EOI ── */
+    if (s->int_no == 47) {
+        outb(0xA0, 0x0B);               /* read slave PIC's ISR register */
+        if (!(inb(0xA0) & 0x80)) {
+            outb(0x20, 0x20);           /* fake: EOI to the master only */
+            return;
+        }
+    }
      if (s->int_no == 33) {
 	unsigned char sc = inb(0x60);
         if (!(sc & 0x80)) {
