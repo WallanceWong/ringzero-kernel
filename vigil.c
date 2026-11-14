@@ -95,3 +95,25 @@ void vigil_on_reading(char kind, int32_t value)
 	    dirty = 0;
  	    return was;
 	}
+
+static int fault_copy = 0;                    /* which copy the next fault hits */
+
+void vigil_inject_fault(void)
+{
+    if(baseline_locked(&base_hr)) {
+        tmr_inject(&tmr_hr, fault_copy, 0x80);
+        fault_copy = (fault_copy + 1) % 3;  /* move fault_copy to the next copy: 0 -> 1 -> 2 -> 0 */
+    }
+}
+
+int vigil_scrub(void)
+{
+    int repaired = 0;
+    tmr_u32 *stores[3] = { &tmr_hr, &tmr_spo2, &tmr_temp };
+
+    for (int i = 0; i < 3; i++) {
+        if (tmr_scrub(stores[i]) == TMR_OUTVOTED)
+            repaired++;
+    }
+    return repaired;
+}
