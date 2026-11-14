@@ -8,3 +8,4 @@ bochsrc.txt
 *.o
 test_drift
 *.o
+*.d
