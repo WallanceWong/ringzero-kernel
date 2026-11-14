@@ -1,6 +1,6 @@
-OBJECTS = loader.o kmain.o fb.o io.o serial.o string.o fb_move_cursor.o gdt.o gdt_load.o idt.o idt_load.o interrupt.o isr.o pic.o pit.o speaker.o gfx.o sensor.o kbd.o drift.o vigil.o
+OBJECTS = loader.o kmain.o fb.o io.o serial.o string.o fb_move_cursor.o gdt.o gdt_load.o idt.o idt_load.o interrupt.o isr.o pic.o pit.o speaker.o gfx.o sensor.o kbd.o drift.o vigil.o tmr.o
 
-CFLAGS = -m32 -nostdlib -nostdinc -isystem $(shell $(CC) -print-file-name=include) \
+CFLAGS = -m32 -mno-sse -mno-sse2 -mno-mmx -nostdlib -nostdinc -isystem $(shell $(CC) -print-file-name=include) \
          -fno-builtin -fno-stack-protector -ffreestanding -MMD -MP \
          -nostartfiles -nodefaultlibs -Wall -Wextra -Werror -c
 LDFLAGS = -T link.ld -melf_i386 -z noexecstack

@@ -1,4 +1,5 @@
 #include "vigil.h"
+#include "tmr.h"
 
 #define LOCK_AFTER 10
 
@@ -11,6 +12,7 @@ static const vital_cfg_t cfg_temp = {1,  8, 15, 0};
 static baseline_t    base_hr, base_spo2, base_temp;
 static drift_state_t st_hr, st_spo2, st_temp;
 static level_t       lvl_hr, lvl_spo2, lvl_temp;
+static tmr_u32 tmr_hr, tmr_spo2, tmr_temp;
 static int           dirty;
 
 void vigil_on_reading(char kind, int32_t value)
@@ -19,6 +21,7 @@ void vigil_on_reading(char kind, int32_t value)
 	baseline_t        *b;
 	drift_state_t     *st;
 	level_t           *lvl;
+	tmr_u32           *tm;          /* ADD THIS LINE */
 
 	switch (kind) {
 	case 'h':
@@ -26,6 +29,7 @@ void vigil_on_reading(char kind, int32_t value)
 	    b   = &base_hr;
 	    st  = &st_hr;
 	    lvl = &lvl_hr;
+	    tm = &tmr_hr;
 	    break;
 	case 'o':
 	    /* same four lines, using the spo2 names */
@@ -33,6 +37,7 @@ void vigil_on_reading(char kind, int32_t value)
 	    b   = &base_spo2;
 	    st  = &st_spo2;
 	    lvl = &lvl_spo2;
+	    tm = &tmr_spo2;
 	    break;
 	case 't':
 	    /* same four lines, using the temp names */
@@ -40,16 +45,24 @@ void vigil_on_reading(char kind, int32_t value)
 	    b   = &base_temp;
 	    st  = &st_temp;
 	    lvl = &lvl_temp;
+	    tm = &tmr_temp;
 	    break;
 	default:
 	    return;          /* any other letter: ignore it */
 	}
 
-	if (!baseline_locked(b)) {
-	    baseline_add(b, value, LOCK_AFTER);
-	    return;
-	}
-	level_t now = drift_update(cfg, b, st, value);
+        if (!baseline_locked(b)) {
+            baseline_add(b, value, LOCK_AFTER);
+            if (baseline_locked(b)) {
+                tmr_write(tm, b->locked_mean);   /* store the new baseline in 3 copies */
+            }
+            return;
+        }
+
+        tmr_status ts;
+        baseline_t vb = *b;                      /* a local copy of the struct */
+        vb.locked_mean = tmr_read(tm, &ts);      /* use the voted baseline */
+        level_t now = drift_update(cfg, &vb, st, value);
 	if (now != *lvl) {
    	 *lvl = now;        /* *lvl means "the thing lvl points at" */
   	  dirty = 1;
