@@ -79,6 +79,7 @@ static void draw_event(void)
     gfx_draw_string(450, 332, "REPAIRED",     0x0000FF00, bg);
 }
 
+static void draw_guidance(void);
 static void draw_status(void)
 {
     level_t lvl = vigil_level();
@@ -107,6 +108,7 @@ static void draw_status(void)
     gfx_draw_string(450, 220, name, 0x00FFFFFF, 0x00101820);
     draw_tmr();
     draw_event();
+    draw_guidance();
 }
 
 static void draw_sim(int on, int day)
@@ -119,6 +121,22 @@ static void draw_sim(int on, int day)
     gfx_draw_string(450, 396, "WEEK ", 0x00FFFFFF, bg);
     gfx_draw_string(490, 396, wk, 0x00FFFFFF, bg);
     gfx_draw_string(498, 396, "/8", 0x00FFFFFF, bg);
+}
+
+static void draw_guidance(void)
+{
+    const unsigned int bg = 0x00101820;
+    level_t l = vigil_level();
+
+    gfx_fill_rect(450, 430, 340, 48, bg);              /* clear the area */
+    if (l == LVL_AMBER) {
+        gfx_draw_string(450, 430, "NEXT STEP:",                0x00FFBF00, bg);
+        gfx_draw_string(450, 446, "Rest, hydrate, re-measure", 0x00FFFFFF, bg);
+        gfx_draw_string(450, 462, "within 24 hours",           0x00FFFFFF, bg);
+    } else if (l == LVL_RED) {
+        gfx_draw_string(450, 430, "NEXT STEP:",                0x00FF4040, bg);
+        gfx_draw_string(450, 446, "Contact the flight surgeon", 0x00FFFFFF, bg);
+    }
 }
 
 int kmain(unsigned int *mbi)
