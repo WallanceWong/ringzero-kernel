@@ -4,7 +4,7 @@
 #define LOCK_AFTER 10
 
 /* settings, from our threshold table */
-static const vital_cfg_t cfg_hr   = {1, 15, 25, 1};
+static const vital_cfg_t cfg_hr = {1, 10, 25, 1};
 static const vital_cfg_t cfg_spo2 = {0,  3,  6, 1};
 static const vital_cfg_t cfg_temp = {1,  8, 15, 0};
 
@@ -22,8 +22,27 @@ static unsigned int ev_tick;
 
 static int fault_copy = 0;                  /* which copy the next fault hits */
 
+/* ---- HR rolling window: median of the last 7 readings ---- */
+static int32_t hr_win[7];
+static unsigned int hr_n;                 /* readings seen so far */
+
+static void hr_push(int32_t v) { hr_win[hr_n % 7] = v; hr_n++; }
+
+static int32_t hr_median(void)            /* only valid when hr_n >= 7 */
+{
+    int32_t t[7];
+    for (int i = 0; i < 7; i++) t[i] = hr_win[i];
+    for (int i = 1; i < 7; i++) {                 /* insertion sort */
+        int32_t k = t[i]; int j = i - 1;
+        while (j >= 0 && t[j] > k) { t[j + 1] = t[j]; j--; }
+        t[j + 1] = k;
+    }
+    return t[3];
+}
+
 void vigil_on_reading(char kind, int32_t value)
 {
+    if (kind == 'h') hr_push(value);
     const vital_cfg_t *cfg;
     baseline_t        *b;
     drift_state_t     *st;
@@ -55,7 +74,8 @@ void vigil_on_reading(char kind, int32_t value)
     tmr_status ts;
     baseline_t vb = *b;                      /* a local copy of the struct */
     vb.locked_mean = tmr_read(tm, &ts);      /* use the voted baseline */
-    level_t now = drift_update(cfg, &vb, st, value);
+    int32_t use = (kind == 'h' && hr_n >= 7) ? hr_median() : value;
+    level_t now = drift_update(cfg, &vb, st, use);
     if (now != *lvl) {
         *lvl = now;
         dirty = 1;
@@ -141,4 +161,15 @@ int vigil_event_active(unsigned int now, int *copy, uint32_t *bad, uint32_t *goo
     *bad  = ev_bad;
     *good = ev_good;
     return 1;
+}
+
+void vigil_reset(void)
+{
+    hr_n = 0;
+    base_hr = (baseline_t){0};  base_spo2 = (baseline_t){0};  base_temp = (baseline_t){0};
+    st_hr   = (drift_state_t){0}; st_spo2 = (drift_state_t){0}; st_temp = (drift_state_t){0};
+    lvl_hr = lvl_spo2 = lvl_temp = LVL_GREEN;
+    tmr_write(&tmr_hr, 0); tmr_write(&tmr_spo2, 0); tmr_write(&tmr_temp, 0);
+    ev_copy = -1;
+    dirty = 1;
 }

@@ -1,5 +1,6 @@
 #include "io.h"
 #include "vigil.h"
+#include "replay_data.h"
 
 void fb_write_cell(unsigned int i, char c, unsigned char fg, unsigned char bg);
 void fb_clear(void);
@@ -108,10 +109,24 @@ static void draw_status(void)
     draw_event();
 }
 
+static void draw_sim(int on, int day)
+{
+    const unsigned int bg = 0x00101820;
+    char wk[3] = { '0' + (day / 7 + 1), 0, 0 };
+    gfx_fill_rect(450, 380, 340, 32, bg);
+    if (!on) return;
+    gfx_draw_string(450, 380, "SIMULATED REPLAY", 0x00FFBF00, bg);
+    gfx_draw_string(450, 396, "WEEK ", 0x00FFFFFF, bg);
+    gfx_draw_string(490, 396, wk, 0x00FFFFFF, bg);
+    gfx_draw_string(498, 396, "/8", 0x00FFFFFF, bg);
+}
+
 int kmain(unsigned int *mbi)
 {
     unsigned int last_scrub = 0;
     int banner_on = 0;
+    int replay_on = 0, replay_day = 0;
+    unsigned int replay_last = 0;
 
     serial_init(0x3F8);
     gfx_init(mbi);
@@ -137,11 +152,22 @@ int kmain(unsigned int *mbi)
                     sensor_feed('h'); sensor_feed('0'); sensor_feed('7');
                     sensor_feed('2'); sensor_feed('\n');
                 }
+	    } else if (c == 'r') {                        /* start 8-week simulated replay */
+ 	   	    vigil_reset();
+ 		    replay_on = 1; replay_day = 0; replay_last = timer_ticks();
+		    draw_sim(1, 0);
             } else {
                 gfx_putc((char)c);
                 sensor_feed((char)c);
             }
         }
+
+	if (replay_on && timer_ticks() - replay_last >= 7) {   /* 56 days x 7 ticks = about 3.9 s */
+		replay_last += 7;
+		vigil_on_reading('h', replay_hr[replay_day]);
+    		draw_sim(1, replay_day);
+    		if (++replay_day >= 56) { replay_on = 0; draw_status(); }
+	}
 
         if (timer_ticks() - last_scrub >= 100) {
             last_scrub += 100;

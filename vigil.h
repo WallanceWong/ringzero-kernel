@@ -13,5 +13,6 @@ int      vigil_scrub(unsigned int now);
 uint32_t vigil_hr_copy(int i);
 uint32_t vigil_hr_voted(void);
 int      vigil_event_active(unsigned int now, int *copy, uint32_t *bad, uint32_t *good);
+void vigil_reset(void);
 
 #endif
