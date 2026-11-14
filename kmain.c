@@ -52,6 +52,32 @@ static void draw_tmr(void)
     gfx_draw_string(450 + 48, 276, num,     0x00FFFFFF, 0x00101820);
 }
 
+static void draw_event(void)
+{
+    int copy;
+    uint32_t bad, good;
+    char num[4];
+    const unsigned int bg = 0x00101820;
+
+    gfx_fill_rect(450, 300, 340, 56, bg);              /* clear the banner area */
+
+    if (!vigil_event_active(timer_ticks(), &copy, &bad, &good))
+        return;
+
+    char one[2] = { 'A' + copy, 0 };
+    gfx_draw_string(450, 300, "FAULT: COPY ", 0x00FF4040, bg);
+    gfx_draw_string(546, 300, one,            0x00FF4040, bg);
+    gfx_draw_string(554, 300, " = ",          0x00FF4040, bg);
+    fmt3(num, bad);
+    gfx_draw_string(578, 300, num,            0x00FF4040, bg);
+
+    gfx_draw_string(450, 316, "OUTVOTED -> ", 0x00FFFFFF, bg);
+    fmt3(num, good);
+    gfx_draw_string(546, 316, num,            0x00FFFFFF, bg);
+
+    gfx_draw_string(450, 332, "REPAIRED",     0x0000FF00, bg);
+}
+
 static void draw_status(void)
 {
     level_t lvl = vigil_level();
@@ -64,7 +90,7 @@ static void draw_status(void)
         name  = "GREEN";
         break;
     case LVL_AMBER:
-        color = 0x00C0C000;
+        color = 0x00FFBF00;
         name  = "AMBER";
         break;
     case LVL_RED:
@@ -79,11 +105,13 @@ static void draw_status(void)
     gfx_fill_rect(450, 100, 200, 100, color);
     gfx_draw_string(450, 220, name, 0x00FFFFFF, 0x00101820);
     draw_tmr();
+    draw_event();
 }
 
 int kmain(unsigned int *mbi)
 {
     unsigned int last_scrub = 0;
+    int banner_on = 0;
 
     serial_init(0x3F8);
     gfx_init(mbi);
@@ -97,24 +125,36 @@ int kmain(unsigned int *mbi)
     outb(0x21, 0xFC);        /* enable timer IRQ0 and keyboard IRQ1 */
     __asm__ volatile ("sti");
 
-    draw_status();                       /* initial GREEN block + panel */
+    draw_status();                       /* initial block + panel */
 
     for (;;) {
         int c;
         while ((c = kb_pop()) != -1) {
             if (c == '\t') {
                 vigil_inject_fault();
+            } else if (c == 'g') {                /* DEBUG: instant baseline lock */
+                for (int n = 0; n < 10; n++) {
+                    sensor_feed('h'); sensor_feed('0'); sensor_feed('7');
+                    sensor_feed('2'); sensor_feed('\n');
+                }
             } else {
                 gfx_putc((char)c);
                 sensor_feed((char)c);
             }
         }
+
         if (timer_ticks() - last_scrub >= 100) {
             last_scrub += 100;
-            vigil_scrub();
+            vigil_scrub(timer_ticks());
         }
-        if (vigil_take_dirty())
+
+        int bc; uint32_t bb, bg;
+        int on = vigil_event_active(timer_ticks(), &bc, &bb, &bg);
+        int d  = vigil_take_dirty();
+        if (on != banner_on || d) {
+            banner_on = on;
             draw_status();
+        }
         __asm__ volatile ("hlt");
     }
 }
