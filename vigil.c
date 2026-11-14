@@ -1,0 +1,84 @@
+#include "vigil.h"
+
+#define LOCK_AFTER 10
+
+/* settings, from our threshold table */
+static const vital_cfg_t cfg_hr   = {1, 15, 25, 1};
+static const vital_cfg_t cfg_spo2 = {0,  3,  6, 1};
+static const vital_cfg_t cfg_temp = {1,  8, 15, 0};
+
+/* state: one baseline, one counter and one level per vital */
+static baseline_t    base_hr, base_spo2, base_temp;
+static drift_state_t st_hr, st_spo2, st_temp;
+static level_t       lvl_hr, lvl_spo2, lvl_temp;
+static int           dirty;
+
+void vigil_on_reading(char kind, int32_t value)
+{
+	const vital_cfg_t *cfg;
+	baseline_t        *b;
+	drift_state_t     *st;
+	level_t           *lvl;
+
+	switch (kind) {
+	case 'h':
+	    cfg = &cfg_hr;
+	    b   = &base_hr;
+	    st  = &st_hr;
+	    lvl = &lvl_hr;
+	    break;
+	case 'o':
+	    /* same four lines, using the spo2 names */
+	    cfg = &cfg_spo2;
+	    b   = &base_spo2;
+	    st  = &st_spo2;
+	    lvl = &lvl_spo2;
+	    break;
+	case 't':
+	    /* same four lines, using the temp names */
+	    cfg = &cfg_temp;
+	    b   = &base_temp;
+	    st  = &st_temp;
+	    lvl = &lvl_temp;
+	    break;
+	default:
+	    return;          /* any other letter: ignore it */
+	}
+
+	if (!baseline_locked(b)) {
+	    baseline_add(b, value, LOCK_AFTER);
+	    return;
+	}
+	level_t now = drift_update(cfg, b, st, value);
+	if (now != *lvl) {
+   	 *lvl = now;        /* *lvl means "the thing lvl points at" */
+  	  dirty = 1;
+	}
+}
+	level_t vigil_vital_level(char kind)
+	{
+   	 switch (kind) {
+   	 case 'h': return lvl_hr;
+   	 case 'o': return lvl_spo2;
+   	 case 't': return lvl_temp;
+   	 default:  return LVL_GREEN;
+   	 	}
+	}
+
+	level_t vigil_level(void)
+	{
+	    level_t worst = lvl_hr;
+
+	    if (lvl_spo2 > worst) worst = lvl_spo2;
+
+	     if (lvl_temp > worst) worst = lvl_temp;
+
+	    return worst;
+	}
+
+	int vigil_take_dirty(void)
+	{
+	    int was = dirty;
+	    dirty = 0;
+ 	    return was;
+	}
