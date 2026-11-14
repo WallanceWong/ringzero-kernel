@@ -1,5 +1,6 @@
 #ifndef DRIFT_H
 #define DRIFT_H
+#define SUSTAIN_N 3
 #include <stdint.h>
 
 typedef enum {

@@ -18,5 +18,14 @@ int main(void) {
         (int)drift_change(&spo2, 98, 99),
         (int)drift_change(&temp, 366, 375));
 
+   /* drift_update test */
+    baseline_t hb = {0};
+    for (int i = 0; i < 3; i++) baseline_add(&hb, 72, 3);
+    drift_state_t st = {0};
+    int32_t seq[] = {83, 84, 85, 74, 91, 91, 91};
+    for (int i = 0; i < 7; i++)
+        printf("%d ", (int)drift_update(&hr, &hb, &st, seq[i]));
+    printf("\n");
+
     return 0;
 }

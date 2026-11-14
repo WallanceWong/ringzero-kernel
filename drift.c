@@ -21,3 +21,21 @@ int32_t drift_change(const vital_cfg_t *cfg, int32_t baseline, int32_t current){
 	if (cfg->is_percent) return (change * 100) / baseline;
 	return change;
 }
+
+level_t drift_update(const vital_cfg_t *cfg, const baseline_t *b, drift_state_t *st, int32_t current){
+	if (!b->locked_flag) return LVL_GREEN;
+	int32_t change = drift_change(cfg, b->locked_mean, current);
+	if (change >= cfg->amber){
+		st->over_count++;
+	} else{
+    		st->over_count = 0;
+    		return LVL_GREEN;
+	}
+	if (st->over_count >= SUSTAIN_N){
+		if (change >= cfg->red){
+			return LVL_RED;
+		} else{
+			return LVL_AMBER;
+		}
+	} else return LVL_GREEN;
+}
