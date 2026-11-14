@@ -23,6 +23,11 @@ static int digits_ok(const char *s)                /* 1 if all 3 are '0'..'9' */
 
 void sensor_feed(char c)
 {
+	if (c == '\b') {
+        if (len > 0)
+            len--;
+        return;
+    }
     if (c != '\n') {
         if (len < sizeof(line))
             line[len++] = c;

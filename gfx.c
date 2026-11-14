@@ -78,6 +78,13 @@ static unsigned int cur_x = 20, cur_y = 300;
 
 void gfx_putc(char c)
 {
+    if (c == '\b') {
+        if (cur_x > 20) {
+            cur_x -= FONT_W;
+            gfx_draw_char(cur_x, cur_y, ' ', 0x00FFFFFF, 0x00101820);
+        }
+        return;
+    }
     if (c == '\n') {
         cur_x = 20;
         cur_y += FONT_H;                    /* one text line down */

@@ -1,4 +1,5 @@
 #include "io.h"
+#include "vigil.h"
 
 void fb_write_cell(unsigned int i, char c, unsigned char fg, unsigned char bg);
 void fb_clear(void);
@@ -20,12 +21,39 @@ void sensor_feed(char c);
 void gfx_putc(char c);
 unsigned int timer_ticks(void);
 
+static void draw_status(void)
+{
+    level_t lvl = vigil_level();
+    unsigned int color;
+    const char *name;
+
+    switch (lvl) {
+	case LVL_GREEN:
+	color = 0x0000C000;
+	name  = "GREEN";
+	break;
+    case LVL_AMBER:
+	color = 0x00C0C000;
+	name  = "AMBER";
+	break;
+    case LVL_RED:
+	color = 0x00C00000;
+	name  = "RED  ";
+	break;
+default:
+    color = 0x0000C000;
+    name  = "GREEN";
+    break;
+}
+    gfx_fill_rect(450, 100, 200, 100, color);
+    gfx_draw_string(450, 220, name, 0x00FFFFFF, 0x00101820);
+}
+
 int kmain(unsigned int *mbi)
 {
     serial_init(0x3F8);
     gfx_init(mbi);
     gfx_fill_rect(0, 0, 800, 600, 0x00101820);       /* dark background */
-    gfx_fill_rect(100, 100, 200, 100, 0x00FF0000);   /* red rectangle */
     gfx_draw_string(100, 220, "ringzero-kernel", 0x00FFFFFF, 0x00101820);
 
     gdt_init();
@@ -35,12 +63,16 @@ int kmain(unsigned int *mbi)
     outb(0x21, 0xFC);        /* enable timer IRQ0 and keyboard IRQ1 */
     __asm__ volatile ("sti");
 
+    draw_status();                       /* initial GREEN block */
+
     for (;;) {
         int c;
         while ((c = kb_pop()) != -1) {
             gfx_putc((char)c);
             sensor_feed((char)c);
         }
+        if (vigil_take_dirty())
+            draw_status();
         __asm__ volatile ("hlt");
     }
 }
