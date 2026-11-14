@@ -9,3 +9,4 @@ bochsrc.txt
 test_drift
 *.o
 *.d
+test_tmr
