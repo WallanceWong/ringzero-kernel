@@ -12,7 +12,7 @@ typedef struct{
     int bad_is_up; /* 1 = rising is bad, 0 = falling is bad */
     int32_t amber;
     int32_t red;
-    int percent;
+    int is_percent;
 }vital_cfg_t;
 
 typedef struct{
@@ -30,4 +30,5 @@ void    baseline_add(baseline_t *b, int32_t sample, uint32_t lock_after);
 int     baseline_locked(const baseline_t *b);
 level_t drift_update(const vital_cfg_t *cfg, const baseline_t *b,
                      drift_state_t *st, int32_t current);
+int32_t drift_change(const vital_cfg_t *cfg, int32_t baseline, int32_t current);
 #endif
