@@ -103,6 +103,7 @@ void vigil_inject_fault(void)
     if(baseline_locked(&base_hr)) {
         tmr_inject(&tmr_hr, fault_copy, 0x80);
         fault_copy = (fault_copy + 1) % 3;  /* move fault_copy to the next copy: 0 -> 1 -> 2 -> 0 */
+	dirty = 1;
     }
 }
 
@@ -115,5 +116,17 @@ int vigil_scrub(void)
         if (tmr_scrub(stores[i]) == TMR_OUTVOTED)
             repaired++;
     }
+    if (repaired > 0) dirty = 1;  
     return repaired;
+}
+
+uint32_t vigil_hr_copy(int i)       /* raw copy i (0, 1 or 2) of the HR baseline */
+{
+     if (i >= 0 && i < 3) return tmr_hr.c[i];
+     else return 0;
+}
+
+uint32_t vigil_hr_voted(void)
+{
+    return tmr_read(&tmr_hr, 0);
 }

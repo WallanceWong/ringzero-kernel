@@ -9,5 +9,7 @@ level_t vigil_vital_level(char kind);
 int     vigil_take_dirty(void);
 void vigil_inject_fault(void);
 int  vigil_scrub(void);
+uint32_t vigil_hr_copy(int i);
+uint32_t vigil_hr_voted(void);
 
 #endif                            /* 2. nothing else needed */
