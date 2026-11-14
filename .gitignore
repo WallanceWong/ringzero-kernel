@@ -6,3 +6,5 @@ bochslog.txt
 bochsrc.txt
 *.dtest_drift
 *.o
+test_drift
+*.o
