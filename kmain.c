@@ -40,9 +40,13 @@ static void ser_num(uint32_t v)
     ser_str(&b[i]);
 }
 
+static unsigned int inj_count = 0;               /* faults injected this boot */
+static unsigned int fix_count = 0;               /* repairs the scrubber made */
+
 static void do_fault(void)                       /* one fault, logged */
 {
     if (vigil_inject_fault()) {
+        inj_count++;
         ser_str("INJ,tick="); ser_num(timer_ticks()); ser_str("\n");
     }
 }
@@ -212,6 +216,17 @@ static void draw_baseline(void)
     }
 }
 
+static void draw_counts(void)                    /* kernel-computed totals */
+{
+    char a[4], b[4];
+    fmt3(a, inj_count > 999 ? 999 : inj_count);
+    fmt3(b, fix_count > 999 ? 999 : fix_count);
+    gfx_draw_string(34,  448, "INJECTED", C_DIM, C_PANEL);
+    gfx_draw_string(106, 448, a,          C_TXT, C_PANEL);
+    gfx_draw_string(150, 448, "FIXED",    C_DIM, C_PANEL);
+    gfx_draw_string(198, 448, b,          C_OK,  C_PANEL);
+}
+
 static void draw_event(void)
 {
     int copy;
@@ -224,6 +239,7 @@ static void draw_event(void)
     if (!vigil_event_active(timer_ticks(), &copy, &bad, &good)) {
         gfx_draw_string_scaled(34, 350, "NO FAULT ACTIVE", C_DIM, C_PANEL, 2);
         gfx_draw_string(34, 392, "Tab = inject one simulated upset", C_DIM, C_PANEL);
+        draw_counts();
         return;
     }
 
@@ -239,6 +255,7 @@ static void draw_event(void)
     gfx_draw_string_scaled(226, 382, num,            C_TXT, C_PANEL, 2);
 
     gfx_draw_string_scaled(34,  418, "REPAIRED",     C_OK, C_PANEL, 2);
+    draw_counts();
 }
 
 static void draw_replay(void)
@@ -345,6 +362,7 @@ int kmain(unsigned int *mbi)
             fault_last = timer_ticks();
             if (vigil_inject_fault()) {
                 ser_str("INJ,tick="); ser_num(timer_ticks()); ser_str("\n");
+                inj_count++;
                 fault_left--;
             } else {
                 fault_left = 0;                           /* baseline not locked: stop */
@@ -363,6 +381,8 @@ int kmain(unsigned int *mbi)
         if (timer_ticks() - last_scrub >= 100) {
             last_scrub += 100;
             if (vigil_scrub(timer_ticks()) > 0) {
+                fix_count++;
+                draw_event();
                 int ec; uint32_t eb, eg;
                 if (vigil_event_active(timer_ticks(), &ec, &eb, &eg)) {
                     char ch[2] = { 'A' + ec, 0 };
