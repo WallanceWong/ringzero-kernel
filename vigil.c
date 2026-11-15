@@ -67,6 +67,7 @@ void vigil_on_reading(char kind, int32_t value)
         baseline_add(b, value, LOCK_AFTER);
         if (baseline_locked(b)) {
             tmr_write(tm, b->locked_mean);   /* store the new baseline in 3 copies */
+	    dirty =1;
         }
         return;
     }

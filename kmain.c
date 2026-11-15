@@ -39,6 +39,36 @@ static void ser_num(uint32_t v)
     ser_str(&b[i]);
 }
 
+static void do_fault(void)                       /* one fault, logged */
+{
+    if (vigil_inject_fault()) {
+        ser_str("INJ,tick="); ser_num(timer_ticks()); ser_str("\n");
+    }
+}
+
+/* ---- serial input from the ESP32: h072 / o098 / t366 / b1 (button) ---- */
+static char sline[8];
+static int  sn = 0;
+
+static void serial_poll(void)
+{
+    while (inb(0x3F8 + 5) & 1) {                 /* UART has a byte waiting */
+        char c = (char)inb(0x3F8);
+        if (c == '\r') continue;
+        if (c != '\n') {
+            if (sn < 7) sline[sn++] = c;
+            continue;
+        }
+        if (sn == 2 && sline[0] == 'b' && sline[1] == '1') {
+            do_fault();                          /* hardware fault button */
+        } else if (sn == 4) {                    /* a vitals line: sensor_feed checks it */
+            for (int i = 0; i < 4; i++) sensor_feed(sline[i]);
+            sensor_feed('\n');
+        }                                        /* w1 / w0 and anything else: ignored */
+        sn = 0;
+    }
+}
+
 static void fmt3(char *out, uint32_t v)         /* 72 -> "072", over 999 -> "???" */
 {
     if (v > 999) { out[0] = out[1] = out[2] = '?'; out[3] = 0; return; }
@@ -170,10 +200,9 @@ int kmain(unsigned int *mbi)
     for (;;) {
         int c;
         while ((c = kb_pop()) != -1) {
-            if (c == '\t') {                              /* one manual fault */
-                if (vigil_inject_fault()) {
-                    ser_str("INJ,tick="); ser_num(timer_ticks()); ser_str("\n");
-                }
+		if (c == '\t') {
+		    do_fault();
+		} else if (c == 'g') {
             } else if (c == 'g') {                        /* DEBUG: instant baseline lock */
                 for (int n = 0; n < 10; n++) {
                     sensor_feed('h'); sensor_feed('0'); sensor_feed('7');
@@ -197,6 +226,8 @@ int kmain(unsigned int *mbi)
                 sensor_feed((char)c);
             }
         }
+
+	serial_poll();
 
         /* 20-fault run: one fault every 1.5 s, so each is repaired before the next */
         if (fault_left > 0 && timer_ticks() - fault_last >= 150) {
