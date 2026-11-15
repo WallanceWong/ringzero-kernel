@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A1-37 VIGIL - Modular Ground Station</title>
+    <script src="chart.umd.js"></script>
+    <script src="replay_data.js"></script>
+    <style>
+        body {
+            background-color: #0a0f18;
+            color: #e0e0e0;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #00ffcc;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .header h1 { color: #00ffcc; margin: 0; letter-spacing: 2px; }
+        .status-badge {
+            background-color: rgba(0, 255, 204, 0.1);
+            border: 1px solid #00ffcc;
+            color: #00ffcc;
+            padding: 5px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        /* 四大模块网格布局：2行2列 */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .sim-badge { background:#ffbf00; color:#0a0f18; font-weight:bold; padding:5px 12px; border-radius:5px; margin-right:10px; }
+        .linkbar { margin-bottom:10px; font-size:13px; color:#8899a6; }
+        .linkbar b { color:#e0e0e0; }
+
+        /* 每个指标的独立模块 */
+        .metric-panel {
+            background-color: #111a28;
+            border: 1px solid #1f334a;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+        .metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px dashed #1f334a;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .metric-title { font-size: 18px; color: #fff; }
+        .metric-value { font-size: 28px; font-weight: bold; color: #00ffcc; text-shadow: 0 0 10px #00ffcc;}
+
+        /* 每个模块里的图表容器 */
+        .chart-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            height: 150px;
+        }
+        .chart-box {
+            position: relative;
+            background: #0a0f18;
+            border-radius: 5px;
+            padding: 5px;
+        }
+        .chart-label {
+            position: absolute;
+            top: 0;
+            left: 5px;
+            font-size: 10px;
+            color: #8899a6;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>A1-37 VIGIL // MODULAR DASHBOARD</h1>
+        <div style="display:flex;align-items:center;">
+            <div class="sim-badge">VITALS: SIMULATED</div>
+            <div class="status-badge" id="sys-status">⚪ OFFLINE</div>
+        </div>
+    </div>
+    <div class="linkbar">KERNEL LINK: <b id="link">NOT CONNECTED</b> &nbsp;|&nbsp; faults injected: <b id="kinj">-</b> &nbsp;|&nbsp; repaired: <b id="kfix">-</b> &nbsp;|&nbsp; all vitals are simulated and sent to the kernel by bridge.py</div>
+
+    <div class="dashboard-grid">
+        <!-- 模块 1：心率 -->
+        <div class="metric-panel">
+            <div class="metric-header">
+                <div class="metric-title">❤️ 心率 Heart Rate</div>
+                <div class="metric-value"><span id="hr-val">--</span> <span style="font-size:14px;">BPM</span></div>
+            </div>
+            <div class="chart-row">
+                <div class="chart-box">
+                    <div class="chart-label">Live: last 60 s</div>
+                    <canvas id="hrShortChart"></canvas>
+                </div>
+                <div class="chart-box">
+                    <div class="chart-label">Since connected</div>
+                    <canvas id="hrLongChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模块 2：血氧 -->
+        <div class="metric-panel">
+            <div class="metric-header">
+                <div class="metric-title">🫁 血氧 SpO2</div>
+                <div class="metric-value"><span id="spo2-val">--</span> <span style="font-size:14px;">%</span></div>
+            </div>
+            <div class="chart-row">
+                <div class="chart-box">
+                    <div class="chart-label">Live: last 60 s</div>
+                    <canvas id="spo2ShortChart"></canvas>
+                </div>
+                <div class="chart-box">
+                    <div class="chart-label">Since connected</div>
+                    <canvas id="spo2LongChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模块 3：血压 -->
+        <div class="metric-panel">
+            <div class="metric-header">
+                <div class="metric-title">🩸 血压 Blood Pressure</div>
+                <div class="metric-value"><span id="bp-val">--</span> <span style="font-size:14px;">mmHg</span></div>
+            </div>
+            <div class="chart-row">
+                <div class="chart-box">
+                    <div class="chart-label">Live: last 60 s</div>
+                    <canvas id="bpShortChart"></canvas>
+                </div>
+                <div class="chart-box">
+                    <div class="chart-label">Since connected</div>
+                    <canvas id="bpLongChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模块 4：体温 -->
+        <div class="metric-panel">
+            <div class="metric-header">
+                <div class="metric-title">🌡️ 体温 Temperature </div>
+                <div class="metric-value"><span id="temp-val">--</span> <span style="font-size:14px;">°C</span></div>
+            </div>
+            <div class="chart-row">
+                <div class="chart-box">
+                    <div class="chart-label">Live: last 60 s</div>
+                    <canvas id="tempShortChart"></canvas>
+                </div>
+                <div class="chart-box">
+                    <div class="chart-label">Since connected</div>
+                    <canvas id="tempLongChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模块5: 睡眠 -->
+    <div class="metric-panel">
+        <div class="metric-header">
+            <div class="metric-title"> 😴睡眠 Sleep</div>
+            <div class="metric-value"><span id="sleep-val">--</span> <span style="font-size:14px;">hours</span></div>
+        </div>
+        <div class="chart-row">
+            <div class="chart-box">
+                <div class="chart-label">Live: last 60 s</div>
+                <canvas id="sleepShortChart"></canvas>
+            </div>
+            <div class="chart-box">
+                <div class="chart-label">Since connected</div>
+                <canvas id="sleepLongChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 通用图表配置
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { display: false }, // 隐藏X轴标签，省空间
+                y: { 
+                    grid: { color: '#1f334a' }, 
+                    ticks: { color: '#8899a6', font: {size: 9} } 
+                }
+            },
+            elements: { point: { radius: 0 } } // 隐藏数据点，看起来更平滑
+        };
+
+        // 颜色定义
+        const colors = {
+            hr: '#ff4d4d', spo2: '#00ffcc', bp: '#ff9800', temp: '#4d94ff', sleep: '#9c27b0'
+        };
+
+        // 构造函数：生成图表（数据由内核实时推送）
+        function createChart(id, color) {
+            const ctx = document.getElementById(id).getContext('2d');
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{ data: [], borderColor: color, borderWidth: 2, tension: 0.4, fill: false }]
+                },
+                options: JSON.parse(JSON.stringify(commonOptions))
+            });
+        }
+        const MAXS = 60, MAXL = 600;
+        function feedChart(ch, v, max) {
+            const d = ch.data.datasets[0].data;
+            d.push(v); ch.data.labels.push(d.length);
+            if (d.length > max) { d.shift(); ch.data.labels.shift(); }
+            ch.update('none');
+        }
+        const C = {
+            hr:    [createChart('hrShortChart', colors.hr),       createChart('hrLongChart', colors.hr)],
+            spo2:  [createChart('spo2ShortChart', colors.spo2),   createChart('spo2LongChart', colors.spo2)],
+            bp:    [createChart('bpShortChart', colors.bp),       createChart('bpLongChart', colors.bp)],
+            temp:  [createChart('tempShortChart', colors.temp),   createChart('tempLongChart', colors.temp)],
+            sleep: [createChart('sleepShortChart', colors.sleep), createChart('sleepLongChart', colors.sleep)]
+        };
+        // fixed y ranges so steady simulated data does not look like violent swings
+        const RNG = { hr:[50,100], spo2:[90,100], bp:[100,140], temp:[35,39], sleep:[0,10] };
+        for (const k in RNG) { for (const c of C[k]) { c.options.scales.y.min = RNG[k][0]; c.options.scales.y.max = RNG[k][1]; c.update('none'); } }
+        function pushAll(k, v) { feedChart(C[k][0], v, MAXS); feedChart(C[k][1], v, MAXL); }
+
+        // 状态徽章 + 内核实时链接（bridge.py -> 127.0.0.1:8037）
+        const sb = document.getElementById('sys-status');
+        function badge(text, color) { sb.innerText = text; sb.style.color = color; sb.style.borderColor = color; }
+        let connected = false, frozen = false, alertText = null;
+
+        // 8周模拟回放：和内核、gen_replay.py 完全相同的规则（7天滚动中位数 >= 基线+10%，连续3天）
+        const BASE = 63;
+        function med(a) { const t = a.slice().sort((x, y) => x - y); return t[Math.floor(t.length / 2)]; }
+        let rtimer = null;
+        function playReplay() {
+            clearInterval(rtimer);
+            let i = 0, run = 0; alertText = null;
+            rtimer = setInterval(() => {
+                if (i >= REPLAY.length) { clearInterval(rtimer); return; }
+                if (i >= 6) {
+                    const m = med(REPLAY.slice(i - 6, i + 1));
+                    run = (m >= BASE * 1.10) ? run + 1 : 0;
+                    if (run >= 3 && !alertText) {
+                        const red = m >= BASE * 1.25;
+                        alertText = (red ? "🔴 RED ALERT" : "🟡 AMBER ALERT") + " (replay day " + (i + 1) + ")";
+                    }
+                }
+                i++;
+            }, 70);
+        }
+
+        let since = 0, lastN = -1;
+        async function poll() {
+            try {
+                const r = await fetch('http://127.0.0.1:8037/events?since=' + since);
+                const d = await r.json();
+                since = d.last; connected = true; frozen = d.frozen;
+                document.getElementById('link').innerText = d.frozen ? 'KERNEL FROZEN' : 'LIVE FROM KERNEL';
+                document.getElementById('kinj').innerText = d.inj;
+                document.getElementById('kfix').innerText = d.fix;
+                if (d.n !== lastN && d.sim_hr != null) {
+                    lastN = d.n;
+                    document.getElementById('hr-val').innerText = d.sim_hr;
+                    document.getElementById('spo2-val').innerText = d.o2;
+                    document.getElementById('temp-val').innerText = (d.t10 / 10).toFixed(1);
+                    document.getElementById('bp-val').innerText = d.bp;
+                    document.getElementById('sleep-val').innerText = (d.sl / 10).toFixed(1);
+                    pushAll('hr', d.sim_hr); pushAll('spo2', d.o2); pushAll('temp', d.t10 / 10);
+                    pushAll('bp', d.bp); pushAll('sleep', d.sl / 10);
+                }
+                for (const e of d.events) { if (e.type === 'REPLAY') playReplay(); }
+            } catch (err) { connected = false; document.getElementById('link').innerText = 'NOT CONNECTED'; }
+            if (!connected) badge('⚪ OFFLINE', '#8899a6');
+            else if (frozen) badge('🔴 KERNEL FROZEN', '#ff4d4d');
+            else if (alertText) badge(alertText, alertText.indexOf('RED') >= 0 ? '#ff4d4d' : '#ff9800');
+            else badge('🟢 SYSTEM ONLINE', '#00ffcc');
+        }
+        setInterval(poll, 300);
+        poll();
+    </script>
+</body>
+</html>

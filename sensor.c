@@ -1,6 +1,7 @@
+
 #include "vigil.h"
 
-unsigned int sensor_hr = 0, sensor_spo2 = 0, sensor_temp = 0;
+unsigned int sensor_hr = 0, sensor_spo2 = 0, sensor_temp = 0, sensor_bp = 0, sensor_sleep = 0;
 
 static char line[8];
 static unsigned int len = 0;
@@ -23,7 +24,7 @@ static int digits_ok(const char *s)                /* 1 if all 3 are '0'..'9' */
 
 void sensor_feed(char c)
 {
-	if (c == '\b') {
+    if (c == '\b') {
         if (len > 0)
             len--;
         return;
@@ -43,6 +44,11 @@ void sensor_feed(char c)
             sensor_spo2 = v;
         else if (line[0] == 't')
             sensor_temp = v;
+        else if (line[0] == 'p')
+            sensor_bp = v;
+        else if (line[0] == 's')
+            sensor_sleep = v;
     }
     len = 0;
 }
+ 

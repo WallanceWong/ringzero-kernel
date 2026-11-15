@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""A1-37 VIGIL bridge: simulator + kernel telemetry -> Ground Station.
+
+usage: python3 bridge.py /dev/pts/N
+- sends SIMULATED vitals to the kernel (h072 / o098 / t366), one set per second
+- reads the kernel's own telemetry lines (INJ / EVT / REPLAY / RUN / FREEZE)
+- serves them on http://127.0.0.1:8037/events for ground_station.html
+Nothing here is a real sensor. All vitals are simulated.
+"""
+import os, sys, time, json, random, threading, termios, tty
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+port = sys.argv[1]
+fd = os.open(port, os.O_RDWR | os.O_NOCTTY)
+try: tty.setraw(fd)
+except Exception: pass
+
+lock = threading.Lock()
+events = []                       # {"id","type","text"}
+state = {"inj": 0, "fix": 0, "frozen": False, "sim_hr": None, "paused_until": 0.0, "n": 0, "o2": None, "t10": None, "bp": None, "sl": None}
+
+def add(t, text):
+    with lock:
+        events.append({"id": len(events) + 1, "type": t, "text": text})
+
+def handle(line):
+    print("KERNEL", line, flush=True)
+    if line.startswith("INJ"):
+        with lock: state["inj"] += 1
+        add("INJ", line)
+    elif line.startswith("EVT"):
+        with lock: state["fix"] += 1
+        add("EVT", line)
+    elif line.startswith("REPLAY"):
+        with lock: state["paused_until"] = time.time() + 8
+        add("REPLAY", line)
+    elif line.startswith("RUN"):
+        add("RUN", line)
+    elif line.startswith("FREEZE"):
+        with lock: state["frozen"] = True
+        add("FREEZE", line)
+
+def reader():
+    buf = b""
+    while True:
+        try:
+            d = os.read(fd, 256)
+        except OSError:
+            time.sleep(0.1); continue
+        if not d: time.sleep(0.05); continue
+        buf += d
+        while b"\n" in buf:
+            ln, buf = buf.split(b"\n", 1)
+            ln = ln.decode("ascii", "ignore").strip()
+            if ln: handle(ln)
+
+def sender():
+    r1, r2 = random.Random(37), random.Random(38)
+    while True:
+        with lock: paused = time.time() < state["paused_until"]; frozen = state["frozen"]
+        if not paused and not frozen:
+            hr = 72 + r1.choice([-1, 0, 1])
+            o2 = 98 + r2.choice([-1, 0, 0, 1])
+            t10 = 366 + r1.choice([-1, 0, 1])
+            bp = 120 + r2.choice([-2, -1, 0, 1, 2])   # simulated systolic
+            sl = 75                                   # simulated sleep, tenths of an hour (7.5 h)
+            with lock:
+                state["sim_hr"] = hr; state["o2"] = o2; state["t10"] = t10; state["bp"] = bp; state["sl"] = sl; state["n"] += 1
+            try:
+                os.write(fd, ("h%03d\no%03d\nt%03d\np%03d\ns%03d\n" % (hr, o2, t10, bp, sl)).encode())
+            except OSError:
+                pass
+        time.sleep(1)
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        since = 0
+        if "since=" in self.path:
+            try: since = int(self.path.split("since=")[1].split("&")[0])
+            except ValueError: pass
+        with lock:
+            body = json.dumps({"events": [e for e in events if e["id"] > since],
+                               "last": len(events), "inj": state["inj"], "fix": state["fix"],
+                               "frozen": state["frozen"], "sim_hr": state["sim_hr"],
+                               "o2": state["o2"], "t10": state["t10"], "bp": state["bp"], "sl": state["sl"], "n": state["n"]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers(); self.wfile.write(body)
+
+threading.Thread(target=reader, daemon=True).start()
+threading.Thread(target=sender, daemon=True).start()
+print("bridge on", port, "-> http://127.0.0.1:8037/events  (SIMULATED vitals)", flush=True)
+HTTPServer(("127.0.0.1", 8037), H).serve_forever()

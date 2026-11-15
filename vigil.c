@@ -1,3 +1,4 @@
+
 #include "vigil.h"
 #include "tmr.h"
 
@@ -7,12 +8,14 @@
 static const vital_cfg_t cfg_hr = {1, 10, 25, 1};
 static const vital_cfg_t cfg_spo2 = {0,  3,  6, 1};
 static const vital_cfg_t cfg_temp = {1,  8, 15, 0};
+static const vital_cfg_t cfg_bp    = {1, 10, 20, 1};   /* systolic: rising is bad, demo values */
+static const vital_cfg_t cfg_sleep = {0, 15, 30, 1};   /* sleep in tenths of an hour: falling is bad, demo values */
 
 /* state: one baseline, one counter and one level per vital */
-static baseline_t    base_hr, base_spo2, base_temp;
-static drift_state_t st_hr, st_spo2, st_temp;
-static level_t       lvl_hr, lvl_spo2, lvl_temp;
-static tmr_u32       tmr_hr, tmr_spo2, tmr_temp;
+static baseline_t    base_hr, base_spo2, base_temp, base_bp, base_sleep;
+static drift_state_t st_hr, st_spo2, st_temp, st_bp, st_sleep;
+static level_t       lvl_hr, lvl_spo2, lvl_temp, lvl_bp, lvl_sleep;
+static tmr_u32       tmr_hr, tmr_spo2, tmr_temp, tmr_bp, tmr_sleep;
 static int           dirty;
 
 /* last repair event (for the on-screen banner) */
@@ -59,6 +62,12 @@ void vigil_on_reading(char kind, int32_t value)
     case 't':
         cfg = &cfg_temp; b = &base_temp; st = &st_temp; lvl = &lvl_temp; tm = &tmr_temp;
         break;
+    case 'p':
+        cfg = &cfg_bp;    b = &base_bp;    st = &st_bp;    lvl = &lvl_bp;    tm = &tmr_bp;
+        break;
+    case 's':
+        cfg = &cfg_sleep; b = &base_sleep; st = &st_sleep; lvl = &lvl_sleep; tm = &tmr_sleep;
+        break;
     default:
         return;                              /* any other letter: ignore it */
     }
@@ -89,7 +98,21 @@ level_t vigil_vital_level(char kind)
     case 'h': return lvl_hr;
     case 'o': return lvl_spo2;
     case 't': return lvl_temp;
+    case 'p': return lvl_bp;
+    case 's': return lvl_sleep;
     default:  return LVL_GREEN;
+    }
+}
+
+int vigil_vital_locked(char kind)            /* 1 once that vital's baseline is locked */
+{
+    switch (kind) {
+    case 'h': return baseline_locked(&base_hr);
+    case 'o': return baseline_locked(&base_spo2);
+    case 't': return baseline_locked(&base_temp);
+    case 'p': return baseline_locked(&base_bp);
+    case 's': return baseline_locked(&base_sleep);
+    default:  return 0;
     }
 }
 
@@ -98,6 +121,8 @@ level_t vigil_level(void)
     level_t worst = lvl_hr;
     if (lvl_spo2 > worst) worst = lvl_spo2;
     if (lvl_temp > worst) worst = lvl_temp;
+    if (lvl_bp > worst) worst = lvl_bp;
+    if (lvl_sleep > worst) worst = lvl_sleep;
     return worst;
 }
 
@@ -145,8 +170,8 @@ int vigil_scrub(unsigned int now)
     }
 
     /* STEP 2: repair */
-    tmr_u32 *stores[3] = { &tmr_hr, &tmr_spo2, &tmr_temp };
-    for (int i = 0; i < 3; i++) {
+    tmr_u32 *stores[5] = { &tmr_hr, &tmr_spo2, &tmr_temp, &tmr_bp, &tmr_sleep };
+    for (int i = 0; i < 5; i++) {
         if (tmr_scrub(stores[i]) == TMR_OUTVOTED)
             repaired++;
     }
@@ -169,9 +194,12 @@ void vigil_reset(void)
 {
     hr_n = 0;
     base_hr = (baseline_t){0};  base_spo2 = (baseline_t){0};  base_temp = (baseline_t){0};
+    base_bp = (baseline_t){0};  base_sleep = (baseline_t){0};
     st_hr   = (drift_state_t){0}; st_spo2 = (drift_state_t){0}; st_temp = (drift_state_t){0};
-    lvl_hr = lvl_spo2 = lvl_temp = LVL_GREEN;
+    st_bp   = (drift_state_t){0}; st_sleep = (drift_state_t){0};
+    lvl_hr = lvl_spo2 = lvl_temp = lvl_bp = lvl_sleep = LVL_GREEN;
     tmr_write(&tmr_hr, 0); tmr_write(&tmr_spo2, 0); tmr_write(&tmr_temp, 0);
+    tmr_write(&tmr_bp, 0); tmr_write(&tmr_sleep, 0);
     ev_copy = -1;
     dirty = 1;
 }

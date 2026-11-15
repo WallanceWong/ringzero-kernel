@@ -22,6 +22,7 @@ void gfx_draw_string_scaled(unsigned int x, unsigned int y, const char *s,
                             unsigned int fg, unsigned int bg, unsigned int scale);
 int kb_pop(void);
 void sensor_feed(char c);
+extern unsigned int sensor_hr, sensor_spo2, sensor_temp, sensor_bp, sensor_sleep;
 void gfx_putc(char c);
 unsigned int timer_ticks(void);
 
@@ -258,13 +259,51 @@ static void draw_event(void)
     draw_counts();
 }
 
+/* one vital: dim label + value coloured by its level ("---" until its baseline locks) */
+static void vit(unsigned int x, unsigned int y, const char *label, char kind, unsigned int v, int tenths)
+{
+    char s[8];
+    uint32_t col = C_DIM;
+    level_t l = vigil_vital_level(kind);
+    int n = 0;
+
+    if (!vigil_vital_locked(kind)) {
+        s[0] = s[1] = s[2] = '-'; s[3] = 0;
+    } else {
+        col = (l == LVL_RED) ? C_FAULT : (l == LVL_AMBER) ? C_AMBER : C_OK;
+        if (tenths) {                                   /* 366 -> "36.6" */
+            if (v > 999) v = 999;
+            if (v >= 100) s[n++] = '0' + (v / 100);
+            s[n++] = '0' + ((v / 10) % 10);
+            s[n++] = '.';
+            s[n++] = '0' + (v % 10);
+            s[n] = 0;
+        } else {
+            fmt3(s, v);
+        }
+    }
+    gfx_draw_string(x, y, label, C_DIM, C_PANEL);
+    gfx_draw_string(x + 8u * 6u, y, s, col, C_PANEL);
+}
+
+static void draw_vitals(void)                           /* five vitals, only while idle */
+{
+    gfx_fill_rect(422, 414, 356, 52, C_PANEL);
+    vit(434, 418, "HR    ", 'h', sensor_hr,    0);
+    vit(546, 418, "SPO2  ", 'o', sensor_spo2,  0);
+    vit(658, 418, "TEMP  ", 't', sensor_temp,  1);
+    vit(434, 440, "BP    ", 'p', sensor_bp,    0);
+    vit(546, 440, "SLEEP ", 's', sensor_sleep, 1);
+}
+
 static void draw_replay(void)
 {
     gfx_fill_rect(422, 338, 356, 130, C_PANEL);
 
     if (!replay_on && !replay_done) {
-        gfx_draw_string_scaled(434, 350, "PRESS R TO RUN", C_DIM, C_PANEL, 2);
-        gfx_draw_string(434, 392, "8 weeks of simulated daily heart rate", C_DIM, C_PANEL);
+        gfx_draw_string_scaled(434, 346, "PRESS R TO RUN", C_DIM, C_PANEL, 2);
+        gfx_draw_string(434, 384, "8 weeks of simulated daily heart rate", C_DIM, C_PANEL);
+        draw_vitals();
         return;
     }
 
@@ -380,6 +419,7 @@ int kmain(unsigned int *mbi)
         /* scrub once per second, log every repair */
         if (timer_ticks() - last_scrub >= 100) {
             last_scrub += 100;
+            if (!replay_on && !replay_done) draw_vitals();
             if (vigil_scrub(timer_ticks()) > 0) {
                 fix_count++;
                 draw_event();
