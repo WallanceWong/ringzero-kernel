@@ -1,0 +1,35 @@
+bridge on /dev/pts/3 -> http://127.0.0.1:8037/events  (SIMULATED vitals)
+KERNEL COG reaction 150 BASELINE
+KERNEL COG reaction 110 BASELINE
+KERNEL COG reaction 120 GREEN
+KERNEL COG reaction 160 GREEN
+KERNEL COG reaction 200 RED
+KERNEL COG reaction 160 RED
+KERNEL COG reaction 170 RED
+KERNEL COG reaction 150 RED
+KERNEL COG reaction 150 RED
+KERNEL COG reaction 140 RED
+KERNEL COG reaction 150 RED
+KERNEL COG reaction 140 AMBER
+KERNEL COG math 5 BASELINE
+KERNEL COG math 5 BASELINE
+KERNEL COG math 5 GREEN
+KERNEL COG math 4 GREEN
+KERNEL COG math 4 AMBER
+KERNEL COG math 4 AMBER
+KERNEL COG math 0 AMBER
+KERNEL COG memory 8 BASELINE
+KERNEL COG memory 8 BASELINE
+KERNEL COG memory 8 GREEN
+KERNEL COG memory 7 GREEN
+KERNEL COG memory 7 AMBER
+KERNEL AINJ,tick=51412,chan=reaction,copy=A
+KERNEL AEVT,tick=51500,chan=reaction,copy=A,bad=12,good=140,repaired=1
+KERNEL AINJ,tick=51558,chan=memory,copy=B
+KERNEL AEVT,tick=51600,chan=memory,copy=B,bad=136,good=8,repaired=1
+KERNEL AINJ,tick=51704,chan=math,copy=C
+KERNEL AEVT,tick=51800,chan=math,copy=C,bad=128,good=0,repaired=1
+KERNEL CHK sugar 105 BASELINE
+KERNEL CHK mood 4 BASELINE
+KERNEL AINJ,tick=53234,chan=sugar,copy=A
+KERNEL AEVT,tick=53300,chan=sugar,copy=A,bad=233,good=105,repaired=1

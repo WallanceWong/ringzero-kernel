@@ -78,8 +78,8 @@ The kernel analyses five vitals with the same protected-baseline design: heart r
 ## Evidence
 
 **Fault injection (real run, `fault.log`, summarised by `fault_table.py`):**
-- 20 faults injected, **20 corrected**. This run was measured before the blood pressure and sleep channels and the on-screen counters were added; the fault path (the heart-rate baseline) was not changed.
-- Time from injection to repair: **160 to 660 ms, mean 410 ms**.
+- 20 faults injected, **20 corrected** (`fault.log`, re-measured on the astronaut-console build with the five vitals flowing; raw serial log in `fault_run_raw.log`).
+- Time from injection to repair: **480 to 980 ms, mean 730 ms** in this run. An earlier run on the submitted build gave 160 to 660 ms, mean 410 ms. Both are real; the repair time is the wait for the next 1 s scrub, so it depends on where the injection falls in the scrub cycle.
 - Faults were injected at a fixed 1.5 s spacing, so this run does not sample every possible timing against the 1 s scrub cycle.
 
 **8-week replay (simulated, `gen_replay.py`):**
