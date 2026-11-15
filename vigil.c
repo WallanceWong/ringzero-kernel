@@ -118,13 +118,14 @@ uint32_t vigil_hr_voted(void)
     return tmr_read(&tmr_hr, 0);
 }
 
-void vigil_inject_fault(void)
+int vigil_inject_fault(void)
 {
-    if (baseline_locked(&base_hr)) {
-        tmr_inject(&tmr_hr, fault_copy, 0x80);
-        fault_copy = (fault_copy + 1) % 3;   /* 0 -> 1 -> 2 -> 0 */
-        dirty = 1;
-    }
+    if (!baseline_locked(&base_hr))
+        return 0;
+    tmr_inject(&tmr_hr, fault_copy, 0x80);
+    fault_copy = (fault_copy + 1) % 3;
+    dirty = 1;
+    return 1;
 }
 
 int vigil_scrub(unsigned int now)

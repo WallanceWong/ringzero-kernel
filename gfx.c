@@ -74,6 +74,24 @@ void gfx_draw_string(unsigned int x, unsigned int y, const char *s,
     }
 }
 
+void gfx_draw_string_scaled(unsigned int x, unsigned int y, const char *s,
+                            unsigned int fg, unsigned int bg, unsigned int scale)
+{
+    while (*s) {
+        char c = *s;
+        if (c < FONT_FIRST || c >= FONT_FIRST + FONT_COUNT)
+            c = '?';
+        const unsigned char *glyph = font8x16[c - FONT_FIRST];
+
+        for (unsigned int row = 0; row < FONT_H; row++)
+            for (unsigned int col = 0; col < FONT_W; col++)
+                gfx_fill_rect(x + col * scale, y + row * scale, scale, scale,
+                              (glyph[row] & (0x80 >> col)) ? fg : bg);
+        x += FONT_W * scale;
+        s++;
+    }
+}
+
 static unsigned int cur_x = 20, cur_y = 300;
 
 void gfx_putc(char c)

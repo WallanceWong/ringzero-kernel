@@ -17,10 +17,27 @@ void serial_hex32(unsigned int v);
 void gfx_init(unsigned int *mbi);
 void gfx_fill_rect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int color);
 void gfx_draw_string(unsigned int x, unsigned int y, const char *s, unsigned int fg, unsigned int bg);
+void gfx_draw_string_scaled(unsigned int x, unsigned int y, const char *s,
+                            unsigned int fg, unsigned int bg, unsigned int scale);
 int kb_pop(void);
 void sensor_feed(char c);
 void gfx_putc(char c);
 unsigned int timer_ticks(void);
+
+/* ---- serial helpers (no printf) ---- */
+static void ser_str(const char *s)
+{
+    serial_write(0x3F8, (char *)s, strlen(s));
+}
+
+static void ser_num(uint32_t v)
+{
+    char b[11];
+    int i = 10;
+    b[i] = 0;
+    do { b[--i] = '0' + (v % 10); v /= 10; } while (v);
+    ser_str(&b[i]);
+}
 
 static void fmt3(char *out, uint32_t v)         /* 72 -> "072", over 999 -> "???" */
 {
@@ -31,12 +48,13 @@ static void fmt3(char *out, uint32_t v)         /* 72 -> "072", over 999 -> "???
     out[3] = 0;
 }
 
+/* ---- drawing ---- */
 static void draw_tmr(void)
 {
     char num[4];
     uint32_t vote = vigil_hr_voted();
 
-    gfx_fill_rect(450, 244, 340, 48, 0x00101820);            /* clear the panel */
+    gfx_fill_rect(450, 244, 340, 48, 0x00101820);
     gfx_draw_string(450, 244, "HR BASELINE", 0x00FFFFFF, 0x00101820);
 
     for (int i = 0; i < 3; i++) {
@@ -60,7 +78,7 @@ static void draw_event(void)
     char num[4];
     const unsigned int bg = 0x00101820;
 
-    gfx_fill_rect(450, 300, 340, 56, bg);              /* clear the banner area */
+    gfx_fill_rect(450, 300, 340, 56, bg);
 
     if (!vigil_event_active(timer_ticks(), &copy, &bad, &good))
         return;
@@ -80,6 +98,7 @@ static void draw_event(void)
 }
 
 static void draw_guidance(void);
+
 static void draw_status(void)
 {
     level_t lvl = vigil_level();
@@ -87,25 +106,14 @@ static void draw_status(void)
     const char *name;
 
     switch (lvl) {
-    case LVL_GREEN:
-        color = 0x0000C000;
-        name  = "GREEN";
-        break;
-    case LVL_AMBER:
-        color = 0x00FFBF00;
-        name  = "AMBER";
-        break;
-    case LVL_RED:
-        color = 0x00C00000;
-        name  = "RED  ";
-        break;
-    default:
-        color = 0x0000C000;
-        name  = "GREEN";
-        break;
+    case LVL_GREEN: color = 0x0000C000; name = "GREEN"; break;
+    case LVL_AMBER: color = 0x00FFBF00; name = "AMBER"; break;
+    case LVL_RED:   color = 0x00C00000; name = "RED  "; break;
+    default:        color = 0x0000C000; name = "GREEN"; break;
     }
     gfx_fill_rect(450, 100, 200, 100, color);
-    gfx_draw_string(450, 220, name, 0x00FFFFFF, 0x00101820);
+    unsigned int tc = (lvl == LVL_AMBER) ? 0x00101820 : 0x00FFFFFF;
+    gfx_draw_string_scaled(470, 118, name, tc, color, 4);
     draw_tmr();
     draw_event();
     draw_guidance();
@@ -115,12 +123,12 @@ static void draw_sim(int on, int day)
 {
     const unsigned int bg = 0x00101820;
     char wk[3] = { '0' + (day / 7 + 1), 0, 0 };
-    gfx_fill_rect(450, 380, 340, 32, bg);
+    gfx_fill_rect(450, 380, 340, 68, bg);
     if (!on) return;
-    gfx_draw_string(450, 380, "SIMULATED REPLAY", 0x00FFBF00, bg);
-    gfx_draw_string(450, 396, "WEEK ", 0x00FFFFFF, bg);
-    gfx_draw_string(490, 396, wk, 0x00FFFFFF, bg);
-    gfx_draw_string(498, 396, "/8", 0x00FFFFFF, bg);
+    gfx_draw_string_scaled(450, 380, "SIMULATED REPLAY", 0x00FFBF00, bg, 2);
+    gfx_draw_string_scaled(450, 414, "WEEK ", 0x00FFFFFF, bg, 2);
+    gfx_draw_string_scaled(530, 414, wk,      0x00FFFFFF, bg, 2);
+    gfx_draw_string_scaled(546, 414, "/8",    0x00FFFFFF, bg, 2);
 }
 
 static void draw_guidance(void)
@@ -128,68 +136,108 @@ static void draw_guidance(void)
     const unsigned int bg = 0x00101820;
     level_t l = vigil_level();
 
-    gfx_fill_rect(450, 430, 340, 48, bg);              /* clear the area */
+    gfx_fill_rect(0, 486, 800, 100, bg);
     if (l == LVL_AMBER) {
-        gfx_draw_string(450, 430, "NEXT STEP:",                0x00FFBF00, bg);
-        gfx_draw_string(450, 446, "Rest, hydrate, re-measure", 0x00FFFFFF, bg);
-        gfx_draw_string(450, 462, "within 24 hours",           0x00FFFFFF, bg);
+        gfx_draw_string_scaled(20, 490, "NEXT STEP:", 0x00FFBF00, bg, 2);
+        gfx_draw_string_scaled(20, 526, "Rest, hydrate, re-measure within 24 hours", 0x00FFFFFF, bg, 2);
     } else if (l == LVL_RED) {
-        gfx_draw_string(450, 430, "NEXT STEP:",                0x00FF4040, bg);
-        gfx_draw_string(450, 446, "Contact the flight surgeon", 0x00FFFFFF, bg);
+        gfx_draw_string_scaled(20, 490, "NEXT STEP:", 0x00FF4040, bg, 2);
+        gfx_draw_string_scaled(20, 526, "Contact the flight surgeon", 0x00FFFFFF, bg, 2);
     }
 }
 
+/* ---- main ---- */
 int kmain(unsigned int *mbi)
 {
-    unsigned int last_scrub = 0;
-    int banner_on = 0;
+    unsigned int last_scrub = 0, last_blink = 0, fault_last = 0, replay_last = 0;
+    int banner_on = 0, blink_on = 0, fault_left = 0;
     int replay_on = 0, replay_day = 0;
-    unsigned int replay_last = 0;
 
     serial_init(0x3F8);
     gfx_init(mbi);
-    gfx_fill_rect(0, 0, 800, 600, 0x00101820);       /* dark background */
+    gfx_fill_rect(0, 0, 800, 600, 0x00101820);
     gfx_draw_string(100, 220, "ringzero-kernel", 0x00FFFFFF, 0x00101820);
 
     gdt_init();
     idt_init();
     pic_remap();
     pit_init(100);
-    outb(0x21, 0xFC);        /* enable timer IRQ0 and keyboard IRQ1 */
+    outb(0x21, 0xFC);                    /* enable timer IRQ0 and keyboard IRQ1 */
     __asm__ volatile ("sti");
 
-    draw_status();                       /* initial block + panel */
+    draw_status();
 
     for (;;) {
         int c;
         while ((c = kb_pop()) != -1) {
-            if (c == '\t') {
-                vigil_inject_fault();
-            } else if (c == 'g') {                /* DEBUG: instant baseline lock */
+            if (c == '\t') {                              /* one manual fault */
+                if (vigil_inject_fault()) {
+                    ser_str("INJ,tick="); ser_num(timer_ticks()); ser_str("\n");
+                }
+            } else if (c == 'g') {                        /* DEBUG: instant baseline lock */
                 for (int n = 0; n < 10; n++) {
                     sensor_feed('h'); sensor_feed('0'); sensor_feed('7');
                     sensor_feed('2'); sensor_feed('\n');
                 }
-	    } else if (c == 'r') {                        /* start 8-week simulated replay */
- 	   	    vigil_reset();
- 		    replay_on = 1; replay_day = 0; replay_last = timer_ticks();
-		    draw_sim(1, 0);
+            } else if (c == 'r') {                        /* 8-week SIMULATED replay */
+                vigil_reset();
+                ser_str("REPLAY,start,sim=1\n");
+                replay_on = 1; replay_day = 0; replay_last = timer_ticks();
+                draw_sim(1, 0);
+            } else if (c == 'x') {                        /* 20 automatic faults for the evidence table */
+                ser_str("RUN,faults=20\n");
+                fault_left = 20;
+                fault_last = timer_ticks() - 150;
+            } else if (c == 'f') {                        /* FREEZE: stop everything, square stops blinking */
+                ser_str("FREEZE\n");
+                __asm__ volatile ("cli");
+                for (;;) __asm__ volatile ("hlt");
             } else {
                 gfx_putc((char)c);
                 sensor_feed((char)c);
             }
         }
 
-	if (replay_on && timer_ticks() - replay_last >= 7) {   /* 56 days x 7 ticks = about 3.9 s */
-		replay_last += 7;
-		vigil_on_reading('h', replay_hr[replay_day]);
-    		draw_sim(1, replay_day);
-    		if (++replay_day >= 56) { replay_on = 0; draw_status(); }
-	}
+        /* 20-fault run: one fault every 1.5 s, so each is repaired before the next */
+        if (fault_left > 0 && timer_ticks() - fault_last >= 150) {
+            fault_last = timer_ticks();
+            if (vigil_inject_fault()) {
+                ser_str("INJ,tick="); ser_num(timer_ticks()); ser_str("\n");
+                fault_left--;
+            } else {
+                fault_left = 0;                           /* baseline not locked: stop */
+            }
+        }
 
+        /* replay: 56 days x 7 ticks = about 3.9 s */
+        if (replay_on && timer_ticks() - replay_last >= 7) {
+            replay_last += 7;
+            vigil_on_reading('h', replay_hr[replay_day]);
+            draw_sim(1, replay_day);
+            if (++replay_day >= 56) { replay_on = 0; draw_status(); }
+        }
+
+        /* scrub once per second, log every repair */
         if (timer_ticks() - last_scrub >= 100) {
             last_scrub += 100;
-            vigil_scrub(timer_ticks());
+            if (vigil_scrub(timer_ticks()) > 0) {
+                int ec; uint32_t eb, eg;
+                if (vigil_event_active(timer_ticks(), &ec, &eb, &eg)) {
+                    char ch[2] = { 'A' + ec, 0 };
+                    ser_str("EVT,tick="); ser_num(timer_ticks());
+                    ser_str(",copy=");    ser_str(ch);
+                    ser_str(",bad=");     ser_num(eb);
+                    ser_str(",good=");    ser_num(eg);
+                    ser_str(",repaired=1\n");
+                }
+            }
+        }
+
+        /* watchdog square: toggles 4x per second, only while the main loop is alive */
+        if (timer_ticks() - last_blink >= 25) {
+            last_blink += 25;
+            blink_on ^= 1;
+            gfx_fill_rect(20, 20, 48, 48, blink_on ? 0x00FFFFFF : 0x00000000);
         }
 
         int bc; uint32_t bb, bg;
