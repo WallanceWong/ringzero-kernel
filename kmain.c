@@ -338,6 +338,8 @@ static void draw_astro_lines(void)
     if (astro_checkin_due(now))
         gfx_draw_string(508, 70, "CHECK-IN DUE  (press M)", C_AMBER, C_HDR);
 
+    if (astro_demo_active())
+        gfx_draw_string(200, 486, "ASTRONAUT DEMO HISTORY (SIMULATED) LOADED", C_AMBER, C_PANEL);
     gfx_fill_rect(22, 536, 756, 20, C_PANEL);
     if (astro_attention(now, b, sizeof b, &lv)) {
         gfx_draw_string(34, 538, "GROUND ATTENTION:", lv == 2 ? C_FAULT : C_AMBER, C_PANEL);

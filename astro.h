@@ -26,5 +26,6 @@ int  astro_inject_fault(void);          /* 1 if a fault was injected */
 int  astro_checkin_due(unsigned int now);
 int  astro_attention(unsigned int now, char *out, unsigned int cap, int *level);
 int  astro_take_dirty(void);            /* 1 if main-screen text must be repainted */
+int  astro_demo_active(void);           /* 1 once the SIMULATED demo history was loaded */
 
 #endif

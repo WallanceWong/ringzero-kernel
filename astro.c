@@ -71,6 +71,8 @@ static unsigned int last_checkin = 0;    /* PIT tick of last check-in (0 = boot)
 static unsigned int a_inj = 0, a_fix = 0;
 static int          inj_next = 0, inj_copy = 0;
 static int          main_dirty = 0;
+static int          demo_active = 0;    /* 1 after the SIMULATED demo history was loaded */
+static int          loading = 0;        /* 1 while the demo history is being written */
 
 typedef enum {
     S_CLOSED, S_MENU, S_GUIDE, S_SUGAR, S_MOOD, S_CI_DONE,
@@ -166,7 +168,9 @@ static void chan_add(int ch, unsigned int v)
     int l = chan_level(ch);
     ser_str(ch < CH_REACT ? "CHK " : "COG ");
     ser_str(chcfg[ch].name); ser_str(" "); ser_num(v); ser_str(" ");
-    ser_str(level_word(l)); ser_str("\n");
+    ser_str(level_word(l));
+    if (loading) ser_str(" SIM");           /* demo history is labelled on the wire too */
+    ser_str("\n");
     main_dirty = 1;
 }
 
@@ -339,8 +343,9 @@ static void draw_menu(void)
     put_num(b, &n, sess[CH_REACT] + sess[CH_MEM] + sess[CH_MATH]);
     gfx_draw_string(20, 482, b, C_ACC, C_BG);
     gfx_draw_string(20, 500, "Sources: vitals SIMULATED | sugar, mood ENTERED by you | tests MEASURED from you", C_DIM, C_BG);
+    if (demo_active) gfx_draw_string(20, 464, "DEMO HISTORY (SIMULATED) is loaded - those entries are not real measurements.", C_AMBER, C_BG);
     draw_attention(520);
-    draw_footer("1-5: choose    Esc: close console");
+    draw_footer("1-5: choose  D: demo history  Esc: close");
 }
 
 static void draw_guide(void)
@@ -558,6 +563,34 @@ void astro_open(void)
     last_strip = timer_ticks();
 }
 
+/* Key D in the menu: deterministic SIMULATED history so drift to AMBER/RED can be shown quickly */
+static void load_demo(void)
+{
+    static const unsigned char sugar[8] = { 100, 98, 102, 100, 101, 125, 128, 130 };   /* ~+28%: RED  */
+    static const unsigned char mood[8]  = { 4, 4, 4, 4, 4, 3, 3, 3 };                  /* -25%: RED   */
+    static const unsigned short react[6] = { 300, 310, 305, 340, 350, 345 };           /* ~+13%: AMBER */
+    static const unsigned char mem[6]   = { 6, 6, 6, 5, 5, 5 };                        /* -17%: AMBER */
+    static const unsigned char mth[6]   = { 5, 5, 5, 4, 4, 4 };                        /* -20%: AMBER */
+    for (int ch = 0; ch < NCH; ch++) {
+        for (int i = 0; i < HIST; i++) tmr_write(&ring[ch][i], 0);
+        tmr_write(&base_t[ch], 0); tmr_write(&best_t[ch], 0);
+        cnt[ch] = 0; sess[ch] = 0; base_set[ch] = 0;
+    }
+    ser_str("DEMO,start,sim=1\n");
+    loading = 1;
+    for (int i = 0; i < 8; i++) chan_add(CH_SUGAR, sugar[i]);
+    for (int i = 0; i < 8; i++) chan_add(CH_MOOD, mood[i]);
+    for (int i = 0; i < 6; i++) chan_add(CH_REACT, react[i]);
+    for (int i = 0; i < 6; i++) chan_add(CH_MEM, mem[i]);
+    for (int i = 0; i < 6; i++) chan_add(CH_MATH, mth[i]);
+    loading = 0;
+    for (int ch = 0; ch < NCH; ch++) sess[ch] = 0;      /* demo entries are not "sessions this boot" */
+    demo_active = 1;
+    main_dirty = 1;
+}
+
+int astro_demo_active(void) { return demo_active; }
+
 static void to_menu(void) { st = S_MENU; dirty = 1; }
 
 static void start_wait(unsigned int now)
@@ -629,6 +662,7 @@ void astro_key(char c)
         else if (c == '3') { st = S_R_IDLE; r_trial = 0; rng ^= now; dirty = 1; }
         else if (c == '4') { st = S_M_IDLE; rng ^= now; dirty = 1; }
         else if (c == '5') { st = S_Q_IDLE; rng ^= now; dirty = 1; }
+        else if (c == 'd') { load_demo(); dirty = 1; }
         break;
     case S_GUIDE:
         if (c == 0x12 || c == 'n') { guide_page = (guide_page + 1) % GUIDE_PAGES; dirty = 1; }
