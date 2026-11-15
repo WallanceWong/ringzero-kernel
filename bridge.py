@@ -45,6 +45,12 @@ def handle(line):
         add("ASTRO", line)
     elif line.startswith("VIT "):                    # vital typed in by the astronaut: VIT hr 72
         p = line.split()
+        if len(p) == 2 and p[1] == "reset":           # astronaut cleared all vitals on the console
+            with lock:
+                for k in ("sim_hr", "o2", "t10", "bp", "sl"): state[k] = None
+                state["n"] += 1
+            add("VITRESET", line)
+            return
         key = {"hr": "sim_hr", "spo2": "o2", "temp": "t10", "bp": "bp", "sleep": "sl"}.get(p[1]) if len(p) == 3 else None
         if key and p[2].isdigit():
             with lock: state[key] = int(p[2]); state["n"] += 1

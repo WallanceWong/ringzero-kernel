@@ -138,7 +138,7 @@ The challenge is about astronauts checking their own health, so the astronaut-fa
 | 3 | Reaction test: 5 trials, Space to start, Space when the screen turns green, result = median ms. Pressing early repeats the trial. |
 | 4 | Memory test: repeat a growing 4-colour sequence with keys 1-4, result = longest correct sequence |
 | 5 | Mental math: 5 questions (+, -, x), typed answers, result = number correct |
-| 6 | Enter vitals: heart rate, SpO2, systolic blood pressure, temperature (type 366 for 36.6), sleep hours (type 75 for 7.5). Enter on an empty line skips a vital. Each vital's baseline locks after 10 entries (demo value), then it is compared with your own baseline. Telemetry: `VIT hr 72`. |
+| 6 | Enter vitals (press **C** on that screen to clear all vitals and start over): heart rate, SpO2, systolic blood pressure, temperature (type 366 for 36.6), sleep hours (type 75 for 7.5). Enter on an empty line skips a vital. Each vital's baseline locks after 10 entries (demo value), then it is compared with your own baseline. Telemetry: `VIT hr 72`. |
 | D (in the menu) | Load a deterministic DEMO HISTORY (SIMULATED) so drift to AMBER/RED can be shown quickly |
 | I | Inject a fault into the astronaut channels (Tab still hits heart rate only) |
 

@@ -615,7 +615,17 @@ static void draw_vit(void)
     }
     gfx_draw_string(20, 470, "Compared only with your own baseline (demo thresholds). Follow mission medical procedures;", C_DIM, C_BG);
     gfx_draw_string(20, 488, "report to the flight surgeon if a status stays AMBER or RED.", C_DIM, C_BG);
-    draw_footer("0-9 type  Bksp fix  Enter save  Esc menu");
+    draw_footer("0-9 type  Bksp fix  Enter save  C clear  Esc menu");
+}
+
+/* Key C on the vitals screens: forget every typed vital and start learning the baselines again */
+static void reset_vitals(void)
+{
+    vigil_reset();                                     /* existing function: baselines, levels and their TMR copies */
+    sensor_hr = sensor_spo2 = sensor_temp = sensor_bp = sensor_sleep = 0;
+    for (int i = 0; i < 5; i++) { vit_val[i] = 0; vit_cnt[i] = 0; }
+    vit_idx = 0; ilen = 0;
+    ser_str("VIT reset\n");
 }
 
 static void draw_all(void)
@@ -811,7 +821,8 @@ void astro_key(char c)
         }
         break;
     case S_VIT:
-        if (c >= '0' && c <= '9' && ilen < 3) { ibuf[ilen++] = c; dirty = 1; }
+        if (c == 'c') { reset_vitals(); st = S_VIT; dirty = 1; }
+        else if (c >= '0' && c <= '9' && ilen < 3) { ibuf[ilen++] = c; dirty = 1; }
         else if (c == '\b' && ilen > 0) { ilen--; dirty = 1; }
         else if (c == '\n') {
             unsigned int v = 0;
@@ -832,7 +843,8 @@ void astro_key(char c)
         }
         break;
     case S_VIT_DONE:
-        if (c == ' ') { st = S_VIT; vit_idx = 0; ilen = 0; dirty = 1; }
+        if (c == 'c') { reset_vitals(); st = S_VIT; dirty = 1; }
+        else if (c == ' ') { st = S_VIT; vit_idx = 0; ilen = 0; dirty = 1; }
         break;
     case S_Q_IDLE:
     case S_Q_DONE:

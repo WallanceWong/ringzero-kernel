@@ -100,7 +100,7 @@
             <div class="status-badge" id="sys-status">⚪ OFFLINE</div>
         </div>
     </div>
-    <div class="linkbar">KERNEL LINK: <b id="link">NOT CONNECTED</b> &nbsp;|&nbsp; faults injected: <b id="kinj">-</b> &nbsp;|&nbsp; repaired: <b id="kfix">-</b> &nbsp;|&nbsp; <span id="vnote">vitals: waiting for the kernel</span></div>
+    <div class="linkbar">KERNEL LINK: <b id="link">NOT CONNECTED</b> &nbsp;|&nbsp; faults injected: <b id="kinj">-</b> &nbsp;|&nbsp; repaired: <b id="kfix">-</b> &nbsp;|&nbsp; <span id="vnote">vitals: waiting for the kernel</span> &nbsp;<button onclick="clearAll()" style="background:#111a28;color:#8899a6;border:1px solid #1f334a;border-radius:4px;cursor:pointer;">clear charts</button></div>
 
     <div class="dashboard-grid">
         <!-- Panel 1: Heart Rate -->
@@ -278,6 +278,12 @@
             }, 70);
         }
 
+        // clear every chart and value (also runs when the astronaut presses C on the kernel console)
+        function clearAll() {
+            for (const k in C) for (const c of C[k]) { c.data.datasets[0].data.length = 0; c.data.labels.length = 0; c.update('none'); }
+            for (const id of ['hr-val','spo2-val','temp-val','bp-val','sleep-val']) document.getElementById(id).innerText = '--';
+        }
+
         let since = 0, lastN = -1;
         async function poll() {
             try {
@@ -302,7 +308,7 @@
                 document.getElementById('ademo').innerText = d.demo ? '| dashed = DEMO' : '';
                 const an = Object.keys(d.astro || {});
                 if (an.length) document.getElementById('achips').innerHTML = an.map(k => '<span class="achip" style="border-style:' + (d.astro[k].sim ? 'dashed' : 'solid') + ';border-color:' + (ac[d.astro[k].lvl] || '#1f334a') + '">' + k + ' ' + d.astro[k].v + ' <span style="color:' + (ac[d.astro[k].lvl] || '#8899a6') + '">' + d.astro[k].lvl + '</span>' + '</span>').join('');
-                for (const e of d.events) { if (e.type === 'REPLAY') playReplay(); }
+                for (const e of d.events) { if (e.type === 'REPLAY') playReplay(); if (e.type === 'VITRESET') clearAll(); }
             } catch (err) { connected = false; document.getElementById('link').innerText = 'NOT CONNECTED'; }
             if (!connected) badge('⚪ OFFLINE', '#8899a6');
             else if (frozen) badge('🔴 KERNEL FROZEN', '#ff4d4d');
