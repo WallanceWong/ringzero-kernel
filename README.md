@@ -1,33 +1,122 @@
-# ringzero-kernel
 
-A small x86 (32-bit) kernel written from scratch in C and NASM assembly, booted by GRUB2 on BIOS.
+# A1-37 VIGIL
 
-## Built so far
-- Multiboot boot via GRUB2, 800x600x32 framebuffer
-- GDT, IDT and interrupt handling, PIC remapping
-- PIT timer at 100 Hz, PC speaker driver
-- PS/2 keyboard driver: scan codes to ASCII, the interrupt stores keys in a ring buffer, the main loop reads them
-- Serial port output (COM1) for debugging
-- Pixel, rectangle and bitmap-font text drawing
-- Parser for simple text sensor lines (`h072`, `o098`, `t366`)
+**A fault-tolerant crew health monitor that runs on its own bare-metal kernel.**
+Team CHS Ring Zero, Catholic High School Sibu. Sarawak Space Challenge 2026 (NASA Space Apps), Junior category.
 
-## Build and run
+> **Read this first.** All vital signs in this project are **SIMULATED**. There is no sensor hardware in the submission. The screen shows a permanent "VITALS: SIMULATED" badge, and the 8-week replay is labelled SIMULATED too. What is real is the kernel, the fault-tolerance mechanism, and the measured repair times.
+
+**Demo video (30 s):** TODO(team): paste the YouTube link here
+
+---
+
+## Why we built it
+
+NASA's Human Research Program groups the risks of human spaceflight into five hazards: space radiation, isolation and confinement, distance from Earth, gravity fields, and hostile or closed environments. Two matter for us:
+
+- **Distance from Earth.** The further a crew travels, the harder it is to get help, supplies and instructions from Earth. A crew health monitor has to keep working without a ground team looking over its shoulder.
+- **Space radiation.** NASA lists it among the most hazardous aspects of spaceflight. Our own engineering reasoning (not a NASA claim) is that radiation can flip bits in computer memory, so a health monitor that stores a baseline in memory could quietly learn a wrong "normal".
+VIGIL learns a crew member's resting baseline, protects it against memory corruption, and warns early when a sustained drift appears.
+
+## NASA and agency resources used
+
+- NASA Human Research Program, *5 Hazards of Human Spaceflight*: https://www.nasa.gov/hrp/hazards
+- NASA Human Research Program, *Risks of Human Spaceflight*: https://www.nasa.gov/hrp/risks
+- Canadian Space Agency, *Monitoring radiation for astronaut health* (26 Feb 2026): https://www.asc-csa.gc.ca/eng/news/articles/2026/2026-02-26-monitoring-radiation-astronaut-health.asp
+We used these for the problem framing only. No NASA data, logos or images are used in the project.
+
+## What it does
+
+| Part | What it does |
+|---|---|
+| Baseline | Learns the mean of the first 10 heart-rate samples, then locks it. |
+| Triple copy (software TMR) | Stores three copies of the baseline and takes a bitwise majority vote. |
+| Scrubber | Once per second, checks the three copies and repairs a disagreeing one. |
+| Drift detector | Compares the median of the last 7 readings with the baseline. Levels: GREEN, AMBER, RED. |
+| Next step | AMBER: "Rest, hydrate, re-measure within 24 hours". RED: "Contact the flight surgeon". GREEN: "Continue routine monitoring". |
+| Heartbeat | A square on screen toggles every 0.25 s. If the kernel freezes, it stops. |
+| Serial telemetry | The kernel logs `INJ`, `EVT`, `REPLAY`, `RUN`, `FREEZE` lines on COM1. |
+
+The screen is 800×600 and has panels for the protected baseline, status, fault monitor, 8-week replay and next step.
+
+**Thresholds are demo values, not clinical values.** Heart rate: 10 % drift = AMBER, 25 % = RED, sustained for 3 readings.
+
+## What is real and what is simulated
+
+| Real | Simulated |
+|---|---|
+| The bare-metal i686 kernel (boots from GRUB, own drivers) | Every vital sign (heart rate, SpO2, temperature) |
+| The triple-copy vote and scrubber | The 8-week replay data (`gen_replay.py`, seed 37) |
+| The fault injection (a bit flipped in one copy) | The "radiation" upset. It is a software bit flip, not a radiation test. |
+| The measured repair times | |
+
+Heart rate is the vital the system actually analyses. SpO2 and temperature are fed in as steady simulated values. Sleep and blood pressure are **future work**.
+
+## Evidence
+
+**Fault injection (real run, `fault.log`, summarised by `fault_table.py`):**
+- 20 faults injected, **20 corrected**.
+- Time from injection to repair: **160 to 660 ms, mean 410 ms**.
+- Faults were injected at a fixed 1.5 s spacing, so this run does not sample every possible timing against the 1 s scrub cycle.
+**8-week replay (simulated, `gen_replay.py`):**
+- 56 daily resting heart-rate values, baseline 63.
+- Rule: 7-day rolling median at least 10 % above baseline for 3 consecutive days. The same rule runs in the kernel, the Ground Station dashboard and the script.
+- Result: **AMBER on day 47**. The kernel's final median is 77, which is +22 % (AMBER, below the RED threshold of 25 %).
+**Bare-metal proof:** TODO(team): add the Dell boot photo here (check there are no faces or reflections of faces)
+
+## Run it
+
+Needs Nix (or install grub, xorriso, mtools, qemu yourself).
+
 ```
-make run-iso      # builds os.iso with grub-mkrescue, runs in QEMU
+nix-shell -p grub2 xorriso mtools qemu --run "make run-iso"
 ```
-Needs: gcc (32-bit), nasm, ld, grub-mkrescue (with xorriso and mtools), qemu-system-i386.
 
-To boot on real hardware, write `os.iso` to a USB stick and boot it in Legacy/CSM (BIOS) mode with Secure Boot off.
+This builds `os.iso` and opens it in QEMU. The kernel needs no input to run, but the baseline only locks after vitals arrive.
 
-## Measurements
-| Test | QEMU (Virtual Machine) | Real hardware |
-|---|---|---|
-| Timer (100 Hz PIT) | 61 ticks in 61 s | on-screen square flips every 1.00 s (10 s sample, within 0.3%) |
-| Full-screen 800x600 fill | 26.7 ms per-pixel, 2.4 ms with row writes | not measured |
-| PC speaker | audible (QEMU audio) | no sound: this laptop has no usable PC speaker path |
-| USB keyboard | n/a | works (BIOS legacy USB emulation) |
+**Feed simulated vitals (second terminal setup):**
 
-## Credits and licence
-- This is my project. I built it by following *The Little Book about OS Development* by Erik Helin and Adam Renberg.
-- Font: `font.h` is generated from DejaVu Sans Mono Bold, under the Bitstream Vera licence (see `FONT-LICENSE.txt`).
-- The code in this repository is MIT licensed (see `LICENSE`). The font and the book keep their own terms.
+```
+nix-shell -p qemu --run 'qemu-system-i386 -cdrom os.iso -serial pty > /tmp/q.out 2>&1 & Q=$!; sleep 4; P=$(grep -o "/dev/pts/[0-9]*" /tmp/q.out | head -1); echo "serial port: $P"; python3 sim_vitals.py "$P"; kill $Q'
+```
+
+This starts QEMU, finds the serial port, and runs `sim_vitals.py`, which sends one simulated reading per second.
+
+**Keys (click the QEMU window first):**
+
+| Key | Action |
+|---|---|
+| Tab | Inject one fault (bit flip in one of the three copies, rotating A, B, C) |
+| X | Inject 20 automatic faults, 150 ticks apart (1 tick = 10 ms) |
+| R | Play the 8-week SIMULATED replay (about 4 s), ends in AMBER |
+| G | Debug: instantly lock the baseline at 72 |
+| F | Freeze the kernel (the heartbeat square stops) |
+
+## Limits (honest list)
+
+- Only the three baseline copies are protected. The rest of the kernel is not.
+- Two corruptions of the same bit in two copies inside one scrub window would defeat the vote.
+- The fault is simulated. We did not test with real radiation.
+- We call it **fault-tolerant**. We do not claim it is radiation-proof.
+- Thresholds are demo values, not medical advice.
+- All vitals are simulated. We have not validated it on a person.
+## Input protocol
+
+The kernel reads 4-character lines on COM1 (115200 baud): `h072` heart rate, `o098` SpO2, `t366` temperature ×10, `b1` inject a fault.
+
+## AI use disclosure
+
+Claude (Anthropic) wrote most of the kernel code from the start of the hackathon, plus the Python scripts and the first draft of this README. The team designed the project, directed the work, built, tested and verified every claim, and ran all measurements. Commit history shows what existed before the hackathon (tag `pre-hackathon`). TODO(team): one sentence on what existed before the hackathon.
+
+## Team
+
+- **Wallance Wong**: kernel, fault tolerance, integration
+- **Kayla Wee**: Ground Station web dashboard
+- **Nathania Chua**: proofreading and filming support
+- Advisor: Mr. Wong Qing Hao
+TODO(team): confirm names and roles are as you want them shown.
+
+## Credits
+
+Font: DejaVu Sans Mono Bold (see `FONT-LICENSE.txt`).
+

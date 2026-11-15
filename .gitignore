@@ -10,4 +10,3 @@ test_drift
 *.o
 *.d
 test_tmr
-esp32_vigil/
