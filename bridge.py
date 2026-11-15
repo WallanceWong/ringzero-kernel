@@ -3,7 +3,7 @@
 
 usage: python3 bridge.py /dev/pts/N
 - sends SIMULATED vitals to the kernel (h072 / o098 / t366), one set per second
-- reads the kernel's own telemetry lines (INJ / EVT / REPLAY / RUN / FREEZE)
+- reads the kernel's own telemetry lines (INJ / EVT / REPLAY / RUN / FREEZE, plus CHK / COG / AINJ / AEVT / DEMO from the astronaut console)
 - serves them on http://127.0.0.1:8037/events for ground_station.html
 Nothing here is a real sensor. All vitals are simulated.
 """
@@ -17,7 +17,7 @@ except Exception: pass
 
 lock = threading.Lock()
 events = []                       # {"id","type","text"}
-state = {"inj": 0, "fix": 0, "frozen": False, "sim_hr": None, "paused_until": 0.0, "n": 0, "o2": None, "t10": None, "bp": None, "sl": None}
+state = {"inj": 0, "fix": 0, "frozen": False, "sim_hr": None, "paused_until": 0.0, "n": 0, "o2": None, "t10": None, "bp": None, "sl": None, "astro": {}, "ainj": 0, "afix": 0, "demo": False}
 
 def add(t, text):
     with lock:
@@ -36,6 +36,20 @@ def handle(line):
         add("REPLAY", line)
     elif line.startswith("RUN"):
         add("RUN", line)
+    elif line.startswith(("CHK ", "COG ")):          # astronaut console: CHK sugar 108 GREEN [SIM]
+        p = line.split()
+        if len(p) >= 4:
+            with lock: state["astro"][p[1]] = {"v": p[2], "lvl": p[3], "sim": len(p) > 4, "kind": p[0]}
+        add("ASTRO", line)
+    elif line.startswith("AINJ"):
+        with lock: state["ainj"] += 1
+        add("AINJ", line)
+    elif line.startswith("AEVT"):
+        with lock: state["afix"] += 1
+        add("AEVT", line)
+    elif line.startswith("DEMO"):
+        with lock: state["demo"] = True
+        add("DEMO", line)
     elif line.startswith("FREEZE"):
         with lock: state["frozen"] = True
         add("FREEZE", line)
@@ -83,7 +97,8 @@ class H(BaseHTTPRequestHandler):
             body = json.dumps({"events": [e for e in events if e["id"] > since],
                                "last": len(events), "inj": state["inj"], "fix": state["fix"],
                                "frozen": state["frozen"], "sim_hr": state["sim_hr"],
-                               "o2": state["o2"], "t10": state["t10"], "bp": state["bp"], "sl": state["sl"], "n": state["n"]}).encode()
+                               "o2": state["o2"], "t10": state["t10"], "bp": state["bp"], "sl": state["sl"], "n": state["n"],
+                               "astro": state["astro"], "ainj": state["ainj"], "afix": state["afix"], "demo": state["demo"]}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")

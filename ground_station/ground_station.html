@@ -188,6 +188,11 @@
         </div>
     </div>
 
+    <div class="astro" id="astro">
+        <b>Astronaut console</b> (from the kernel; sugar and mood ENTERED by the astronaut, tests MEASURED) &nbsp;|&nbsp; faults injected: <b id="ainj">0</b> &nbsp;|&nbsp; repaired: <b id="afix">0</b> <span id="ademo" style="color:#ff9800"></span>
+        <div id="achips">no check-in or test yet</div>
+    </div>
+
     <script>
         // 通用图表配置
         const commonOptions = {
@@ -286,6 +291,11 @@
                     pushAll('hr', d.sim_hr); pushAll('spo2', d.o2); pushAll('temp', d.t10 / 10);
                     pushAll('bp', d.bp); pushAll('sleep', d.sl / 10);
                 }
+                const ac = {GREEN:'#00ffcc', AMBER:'#ff9800', RED:'#ff4d4d', BASELINE:'#8899a6'};
+                document.getElementById('ainj').innerText = d.ainj; document.getElementById('afix').innerText = d.afix;
+                document.getElementById('ademo').innerText = d.demo ? '| includes DEMO HISTORY (SIMULATED)' : '';
+                const an = Object.keys(d.astro || {});
+                if (an.length) document.getElementById('achips').innerHTML = an.map(k => '<span class="achip" style="border-color:' + (ac[d.astro[k].lvl] || '#1f334a') + '">' + k + ' ' + d.astro[k].v + ' <span style="color:' + (ac[d.astro[k].lvl] || '#8899a6') + '">' + d.astro[k].lvl + '</span>' + (d.astro[k].sim ? ' SIM' : '') + '</span>').join('');
                 for (const e of d.events) { if (e.type === 'REPLAY') playReplay(); }
             } catch (err) { connected = false; document.getElementById('link').innerText = 'NOT CONNECTED'; }
             if (!connected) badge('⚪ OFFLINE', '#8899a6');
