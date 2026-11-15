@@ -607,8 +607,8 @@ static void draw_vit(void)
         gfx_draw_string(250, y + 3, b, C_TXT, C_PANEL);
         n = 0; b[0] = 0;
         if (!locked) {
-            put_str(b, &n, "Learning baseline: entries this boot "); put_num(b, &n, vit_cnt[i]);
-            put_str(b, &n, " (locks after "); put_num(b, &n, VITAL_LOCK_N); put_str(b, &n, ")");
+            put_str(b, &n, "Learning baseline: "); put_num(b, &n, vit_cnt[i]);
+            put_str(b, &n, " of "); put_num(b, &n, VITAL_LOCK_N); put_str(b, &n, " entries");
         } else put_str(b, &n, l == LVL_RED ? "RED" : l == LVL_AMBER ? "AMBER" : "GREEN");
         gfx_fill_rect(400, y + 3, 12, 12, col);
         gfx_draw_string(418, y + 3, b, col, C_PANEL);
@@ -676,6 +676,7 @@ static void load_demo(void)
 
 int astro_demo_active(void) { return demo_active; }
 int astro_vit_sim(void) { return vit_sim; }
+int astro_vit_count(int i) { return (i >= 0 && i < 5) ? (int)vit_cnt[i] : 0; }
 void astro_set_vit_sim(int v) { vit_sim = v; }
 
 static void to_menu(void) { st = S_MENU; dirty = 1; }

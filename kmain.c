@@ -224,6 +224,12 @@ static void draw_baseline(void)
     }
 
     gfx_draw_string(36, 230, "MAJORITY VOTE", C_DIM, C_PANEL);
+    if (vote == 0 && !astro_vit_sim() && astro_vit_count(0) > 0) {     /* typed entries so far */
+        char e[24] = "ENTRIES ";
+        e[8] = '0' + (astro_vit_count(0) / 10) % 10; e[9] = '0' + astro_vit_count(0) % 10;
+        e[10] = ' '; e[11] = 'O'; e[12] = 'F'; e[13] = ' '; e[14] = '1'; e[15] = '0'; e[16] = 0;
+        gfx_draw_string(200, 230, e, C_ACC, C_PANEL);
+    }
     if (vote == 0) {
         gfx_draw_string_scaled(36, 256, "LEARNING BASELINE", C_DIM, C_PANEL, 2);
     } else {
@@ -286,8 +292,15 @@ static void vit(unsigned int x, unsigned int y, const char *label, char kind, un
     level_t l = vigil_vital_level(kind);
     int n = 0;
 
-    if (!vigil_vital_locked(kind)) {
-        s[0] = s[1] = s[2] = '-'; s[3] = 0;
+    if (!vigil_vital_locked(kind) && v == 0) {
+        s[0] = s[1] = s[2] = '-'; s[3] = 0;              /* nothing entered yet */
+    } else if (!vigil_vital_locked(kind)) {
+        n = 0;                                          /* entered, baseline still learning: show the value, dim */
+        if (tenths) {
+            if (v > 999) v = 999;
+            if (v >= 100) s[n++] = '0' + (v / 100);
+            s[n++] = '0' + ((v / 10) % 10); s[n++] = '.'; s[n++] = '0' + (v % 10); s[n] = 0;
+        } else fmt3(s, v);
     } else {
         col = (l == LVL_RED) ? C_FAULT : (l == LVL_AMBER) ? C_AMBER : C_OK;
         if (tenths) {                                   /* 366 -> "36.6" */
