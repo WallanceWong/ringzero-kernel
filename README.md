@@ -50,7 +50,7 @@ The screen is 800×600 and has panels for the protected baseline, status, fault 
 | The fault injection (a bit flipped in one copy) | The "radiation" upset. It is a software bit flip, not a radiation test. |
 | The measured repair times | |
 
-Heart rate is the vital the system actually analyses. SpO2 and temperature are fed in as steady simulated values. Sleep and blood pressure are **future work**.
+Heart rate is the vital the system actually analyses. SpO2 and temperature are fed in as steady simulated values. Blood sugar and mood are **entered by the astronaut** in the astronaut console (see below); they are not read from a sensor.
 
 ## Evidence
 
@@ -92,6 +92,34 @@ This starts QEMU, finds the serial port, and runs `sim_vitals.py`, which sends o
 | G | Debug: instantly lock the baseline at 72 |
 | F | Freeze the kernel (the heartbeat square stops) |
 
+## Astronaut console (keyboard only, on the kernel screen)
+
+The challenge is about astronauts checking their own health, so the astronaut-facing features live in the kernel. The Ground Station only receives results and alerts. Press **M** to open the console, **Esc** to go back or close.
+
+| Key | Action |
+|---|---|
+| M / Esc | Open / back / close the console |
+| 1 | Health guide (8 pages: heart rate, SpO2, blood pressure, temperature, sleep, blood sugar, mood, cognitive check). Left/Right or N/P change page. Each page: what it is, why we check it, how the NASA HRP hazards affect it, when to alert crew or flight surgeon, safe general action. |
+| 2 | Check-in: type blood sugar in mg/dL (Backspace, Enter), then press 1-5 for mood (1 low, 5 good) |
+| 3 | Reaction test: 5 trials, Space to start, Space when the screen turns green, result = median ms. Pressing early repeats the trial. |
+| 4 | Memory test: repeat a growing 4-colour sequence with keys 1-4, result = longest correct sequence |
+| 5 | Mental math: 5 questions (+, -, x), typed answers, result = number correct |
+| D (in the menu) | Load a deterministic DEMO HISTORY (SIMULATED) so drift to AMBER/RED can be shown quickly |
+| I | Inject a fault into the astronaut channels (Tab still hits heart rate only) |
+
+**Where each number comes from (labelled on screen):** the 5 vitals = SIMULATED. Blood sugar and mood = ENTERED BY THE ASTRONAUT. Reaction, memory and math = MEASURED from the person using the keyboard. Demo history = SIMULATED.
+
+**Fault tolerance:** every saved value, every baseline and every best value is stored in three copies, voted on read, and repaired by the scrubber once per second. It is the same `tmr.c` code as the vitals (no second voter). Serial lines `AINJ` / `AEVT` show injected and repaired faults. The history position counters are plain integers and are not protected.
+
+**Own-baseline rule (demo thresholds, not clinical limits; one `#define` block in `astro.c`):** baseline = median of the first 5 check-in entries, or the first 3 test sessions. Status = median of the last 3 entries compared with that baseline: 10 % worse = AMBER, 25 % worse = RED. Blood sugar: a change either way counts. Mood, memory, math: lower is worse. Reaction: higher is worse. Until the baseline exists the screen says "Building baseline (n/N)". We give no clinical reference ranges.
+
+**Limits of this part (honest list):**
+- Timing resolution is **10 ms** (PIT at 100 Hz). In QEMU the keyboard path adds extra delay, so reaction numbers there are for testing the logic, not for judging a person.
+- The history (8 entries per indicator) is in RAM and is **lost on reboot**. "Sessions this boot" counts only this boot. There is no real-time clock, so there are no day counts or streaks.
+- "CHECK-IN DUE" is an **uptime-based demo reminder** (120 s since boot or the last check-in), not a real schedule.
+- Guidance is general information, not medical advice, and is not a diagnosis. It always points to mission medical procedures and the flight surgeon.
+- Serial telemetry added: `CHK` (sugar, mood), `COG` (reaction, memory, math), `AINJ`, `AEVT`, `DEMO`. Demo entries carry a `SIM` suffix. A small panel in the Ground Station shows them.
+
 ## Limits (honest list)
 
 - Only the three baseline copies are protected. The rest of the kernel is not.
@@ -106,7 +134,7 @@ The kernel reads 4-character lines on COM1 (115200 baud): `h072` heart rate, `o0
 
 ## AI use disclosure
 
-Claude (Anthropic) wrote most of the kernel code from the start of the hackathon, plus the Python scripts and the first draft of this README. The team designed the project, directed the work, built, tested and verified every claim, and ran all measurements. Commit history shows what existed before the hackathon (tag `pre-hackathon`). TODO(team): one sentence on what existed before the hackathon.
+The astronaut console (`astro.c`, `guide.c`), the bridge/Ground Station additions and this section were also AI-assisted (Claude, Anthropic); the team directed and tested them. Claude (Anthropic) wrote most of the kernel code from the start of the hackathon, plus the Python scripts and the first draft of this README. The team designed the project, directed the work, built, tested and verified every claim, and ran all measurements. Commit history shows what existed before the hackathon (tag `pre-hackathon`). TODO(team): one sentence on what existed before the hackathon.
 
 ## Team
 
