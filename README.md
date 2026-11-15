@@ -5,7 +5,7 @@ Team CHS Ring Zero, Catholic High School Sibu. Sarawak Space Challenge 2026 (NAS
 
 **Challenge:** *Create Health Monitoring Software for Astronauts on Space Missions* (NASA Space Apps 2026).
 
-> **Read this first.** All vital signs in this project are **SIMULATED**. There is no sensor hardware in the submission. The screen shows a permanent "VITALS: SIMULATED" badge, and the 8-week replay is labelled SIMULATED too. What is real is the kernel, the fault-tolerance mechanism, and the measured repair times.
+> **Read this first.** There is no sensor hardware in this project. Vital signs are **typed in by the astronaut** (console key 6, badge "VITALS: ENTERED BY THE ASTRONAUT"). The optional simulator (`bridge.py --sim`) makes the badge change to "VITALS: SIMULATED", and the 8-week replay and the demo history are always labelled SIMULATED. What is real is the kernel, the fault-tolerance mechanism, and the measured repair times.
 
 **Demo video (30 s):** https://youtu.be/_Nj1hWAB3Fg
 
@@ -28,7 +28,7 @@ The challenge asks for software that gathers health indicators and lets astronau
 
 | The challenge asks for | What VIGIL does |
 |---|---|
-| Gather health indicators | Reads five vitals over a simple serial protocol: heart rate, SpO2, body temperature, systolic blood pressure and sleep hours. Four of them are on the challenge's own list. The source is simulated. |
+| Gather health indicators | Reads five vitals over a simple serial protocol: heart rate, SpO2, body temperature, systolic blood pressure and sleep hours. Four of them are on the challenge's own list. The astronaut types them in on the console (nothing is read from a sensor); an optional simulator can feed them instead and is then labelled SIMULATED. |
 | Astronauts must spot changes in themselves | Learns each crew member's own baseline and looks for a sustained drift away from it, not a one-off reading. |
 | Colour coding at a glance | One large GREEN / AMBER / RED status. Each vital is also coloured by its own level. |
 | Guidance on what to do | A plain "next step" line for each level, for example "Rest, hydrate, re-measure within 24 hours". |
@@ -68,12 +68,12 @@ The screen is 800×600 and has panels for the protected baseline, status, fault 
 
 | Real | Simulated |
 |---|---|
-| The bare-metal i686 kernel (boots from GRUB, own drivers) | Every vital sign (heart rate, SpO2, temperature, blood pressure, sleep) |
+| The bare-metal i686 kernel (boots from GRUB, own drivers) | The optional vitals simulator (`bridge.py --sim`) and the demo history |
 | The triple-copy vote and scrubber | The 8-week replay data (`gen_replay.py`, seed 37) |
 | The fault injection (a bit flipped in one copy) | The "radiation" upset. It is a software bit flip, not a radiation test. |
 | The measured repair times | |
 
-The kernel analyses five vitals with the same protected-baseline design: heart rate, SpO2, temperature, systolic blood pressure and sleep. All values are simulated and nearly steady. Only the heart-rate baseline receives the injected faults, and only heart rate is used in the 8-week replay. Blood sugar and mood are **entered by the astronaut** in the astronaut console (see below); they are not read from a sensor.
+The kernel analyses five vitals with the same protected-baseline design: heart rate, SpO2, temperature, systolic blood pressure and sleep. The values are typed in by the astronaut (console key 6) or, with `--sim`, simulated and nearly steady. Only the heart-rate baseline receives the injected faults, and only heart rate is used in the 8-week replay. Blood sugar and mood are **entered by the astronaut** in the astronaut console (see below); they are not read from a sensor.
 
 ## Evidence
 
@@ -108,13 +108,13 @@ nix-shell -p grub2 xorriso mtools qemu --run "make run-iso"
 
 This builds `os.iso` and opens it in QEMU. The kernel needs no input to run, but the baseline only locks after vitals arrive.
 
-**Feed simulated vitals (second terminal setup):**
+**Optional: feed SIMULATED vitals and run the Ground Station link (second terminal setup).** Without `--sim` the bridge only relays the kernel's telemetry, and the vitals are typed in on the kernel console:
 
 ```
-nix-shell -p qemu --run 'qemu-system-i386 -cdrom os.iso -serial pty > /tmp/q.out 2>&1 & Q=$!; sleep 4; P=$(grep -o "/dev/pts/[0-9]*" /tmp/q.out | head -1); echo "serial port: $P"; python3 bridge.py "$P"; kill $Q'
+nix-shell -p qemu --run 'qemu-system-i386 -cdrom os.iso -serial pty > /tmp/q.out 2>&1 & Q=$!; sleep 4; P=$(grep -o "/dev/pts/[0-9]*" /tmp/q.out | head -1); echo "serial port: $P"; python3 bridge.py "$P" --sim; kill $Q'
 ```
 
-This starts QEMU, finds the serial port, and runs `bridge.py`, which sends one set of simulated readings per second and serves the kernel's own telemetry to the Ground Station on 127.0.0.1:8037.
+This starts QEMU, finds the serial port, and runs `bridge.py`, which (with `--sim`) sends one set of simulated readings per second, and always serves the kernel's own telemetry to the Ground Station on 127.0.0.1:8037.
 
 **Keys (click the QEMU window first):**
 
@@ -138,10 +138,11 @@ The challenge is about astronauts checking their own health, so the astronaut-fa
 | 3 | Reaction test: 5 trials, Space to start, Space when the screen turns green, result = median ms. Pressing early repeats the trial. |
 | 4 | Memory test: repeat a growing 4-colour sequence with keys 1-4, result = longest correct sequence |
 | 5 | Mental math: 5 questions (+, -, x), typed answers, result = number correct |
+| 6 | Enter vitals: heart rate, SpO2, systolic blood pressure, temperature (type 366 for 36.6), sleep hours (type 75 for 7.5). Enter on an empty line skips a vital. Each vital's baseline locks after 10 entries (demo value), then it is compared with your own baseline. Telemetry: `VIT hr 72`. |
 | D (in the menu) | Load a deterministic DEMO HISTORY (SIMULATED) so drift to AMBER/RED can be shown quickly |
 | I | Inject a fault into the astronaut channels (Tab still hits heart rate only) |
 
-**Where each number comes from (labelled on screen):** the 5 vitals = SIMULATED. Blood sugar and mood = ENTERED BY THE ASTRONAUT. Reaction, memory and math = MEASURED from the person using the keyboard. Demo history = SIMULATED.
+**Where each number comes from (labelled on screen):** the 5 vitals, blood sugar and mood = ENTERED BY THE ASTRONAUT (the vitals read SIMULATED only while the `--sim` feed is running; the badge shows which). Reaction, memory and math = MEASURED from the person using the keyboard. Demo history = SIMULATED.
 
 **Fault tolerance:** every saved value, every baseline and every best value is stored in three copies, voted on read, and repaired by the scrubber once per second. It is the same `tmr.c` code as the vitals (no second voter). Serial lines `AINJ` / `AEVT` show injected and repaired faults. The history position counters are plain integers and are not protected.
 
@@ -158,7 +159,7 @@ The challenge is about astronauts checking their own health, so the astronaut-fa
 `ground_station/ground_station.html` is a browser dashboard designed by Kayla. Run `python3 bridge.py` (see Run it), then open the file in a browser.
 
 - **Live from the kernel:** the faults-injected and repaired counts, the event lines, and the start of the replay come from the kernel's serial telemetry.
-- **Live from the simulator:** the five vital values and their charts show what the simulator sent to the kernel. They are SIMULATED.
+- **Live from the simulator:** the five vital values and their charts show what the simulator sent to the kernel. They are typed in by the astronaut (`VIT` telemetry) or, with `--sim`, SIMULATED; the badge says which.
 - **Replay:** when the kernel starts its 8-week replay, the dashboard runs the same rule on the same 56 simulated values and shows AMBER at day 47. The kernel does not send per-day data over serial, so this part is a recomputation, not a live feed.
 - Without the bridge the page says NOT CONNECTED.
 - Reload the page after you restart the kernel. An open page keeps the alert badge from the previous run.
@@ -171,8 +172,8 @@ The challenge is about astronauts checking their own health, so the astronaut-fa
 - The fault is simulated. We did not test with real radiation.
 - We call it **fault-tolerant**. We do not claim it is radiation-proof.
 - Thresholds are demo values, not medical advice.
-- All vitals are simulated. We have not validated it on a person.
-- Blood sugar and mood are **typed in by the astronaut** (console key 2). Nothing checks that the number came from a real device. The five vitals still arrive over the serial protocol and are simulated.
+- Vitals are typed in by the astronaut; nothing checks they came from a real device (or, with `--sim`, they are simulated). We have not validated it on a person.
+- Blood sugar and mood are **typed in by the astronaut** (console key 2). Nothing checks that the number came from a real device. The five vitals are typed in on console key 6 (same checks, same protected storage) or arrive over the serial protocol from the simulator.
 - The main-screen advice is one short line per level. The explanations live in the Health guide (console key 1) and are general information, not medical advice.
 - Console history is in RAM only and is lost on reboot.
 

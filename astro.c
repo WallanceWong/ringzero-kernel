@@ -4,6 +4,7 @@
  * repaints only when something changed. Nothing here ever waits. */
 #include "astro.h"
 #include "tmr.h"
+#include "vigil.h"
 
 void gfx_fill_rect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int color);
 void gfx_draw_string(unsigned int x, unsigned int y, const char *s, unsigned int fg, unsigned int bg);
@@ -12,6 +13,7 @@ void gfx_draw_string_scaled(unsigned int x, unsigned int y, const char *s,
 unsigned int timer_ticks(void);
 int serial_write(unsigned short com, char *buf, unsigned int len);
 unsigned int strlen(const char *s);
+void sensor_feed(char c);
 
 extern unsigned int sensor_hr, sensor_spo2, sensor_temp, sensor_bp, sensor_sleep;
 
@@ -72,13 +74,18 @@ static unsigned int a_inj = 0, a_fix = 0;
 static int          inj_next = 0, inj_copy = 0;
 static int          main_dirty = 0;
 static int          demo_active = 0;    /* 1 after the SIMULATED demo history was loaded */
+static int          vit_sim = 0;        /* 0 = vitals typed in by the astronaut, 1 = serial feed (simulator) */
+static unsigned int vit_idx = 0;        /* which vital is being typed (0..4) */
+static unsigned int vit_val[5];         /* last value typed for each vital (0 = none yet) */
+static unsigned int vit_cnt[5];         /* entries typed this boot */
 static int          loading = 0;        /* 1 while the demo history is being written */
 
 typedef enum {
     S_CLOSED, S_MENU, S_GUIDE, S_SUGAR, S_MOOD, S_CI_DONE,
     S_R_IDLE, S_R_WAIT, S_R_GO, S_R_MSG, S_R_DONE,
     S_M_IDLE, S_M_SHOW, S_M_INPUT, S_M_DONE,
-    S_Q_IDLE, S_Q, S_Q_DONE
+    S_Q_IDLE, S_Q, S_Q_DONE,
+    S_VIT, S_VIT_DONE
 } astate_t;
 
 /* ---- small text helpers (no printf in this kernel) ---- */
@@ -233,7 +240,12 @@ static void draw_header(void)
     gfx_draw_string(100, 66, "A1-37 VIGIL  |  your own health check  |  keyboard only", C_DIM, C_HDR);
     gfx_draw_string(8, 70, "HEARTBEAT", C_DIM, C_HDR);
     gfx_fill_rect(508, 20, 280, 48, C_AMBER);
-    gfx_draw_string_scaled(512, 28, "VITALS: SIMULATED", C_BG, C_AMBER, 2);
+    if (vit_sim) {
+        gfx_draw_string_scaled(512, 28, "VITALS: SIMULATED", C_BG, C_AMBER, 2);
+    } else {
+        gfx_draw_string_scaled(512, 21, "VITALS: ENTERED", C_BG, C_AMBER, 2);
+        gfx_draw_string(512, 51, "BY THE ASTRONAUT", C_BG, C_AMBER);
+    }
 }
 
 static void fmt3(char *out, unsigned int v)
@@ -249,7 +261,7 @@ static void draw_strip(void)                   /* the 5 SIMULATED vitals, refres
     char t[4];
     gfx_fill_rect(0, 94, 800, 22, C_BG);
     s[0] = 0;
-    put_str(s, &n, "SIMULATED VITALS  HR "); fmt3(t, sensor_hr); put_str(s, &n, t);
+    put_str(s, &n, vit_sim ? "SIMULATED VITALS  HR " : "VITALS (ENTERED)  HR "); fmt3(t, sensor_hr); put_str(s, &n, t);
     put_str(s, &n, "  SPO2 "); fmt3(t, sensor_spo2); put_str(s, &n, t);
     put_str(s, &n, "  BP "); fmt3(t, sensor_bp); put_str(s, &n, t);
     put_str(s, &n, "  TEMP "); put_num(s, &n, sensor_temp / 10); put_str(s, &n, ".");
@@ -333,19 +345,20 @@ static void draw_menu(void)
     char b[60]; unsigned int n = 0;
     gfx_draw_string(20, 124, "MENU", C_ACC, C_BG);
     gfx_draw_string_scaled(40, 144, "1  Health guide", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 174, "2  Check-in (blood sugar, mood)", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 204, "3  Reaction test", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 234, "4  Memory test", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 264, "5  Mental math", C_TXT, C_BG, 2);
-    draw_table(304, 0, NCH);
+    gfx_draw_string_scaled(40, 180, "2  Check-in", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(40, 216, "3  Reaction test", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(420, 144, "4  Memory test", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(420, 180, "5  Mental math", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(420, 216, "6  Enter vitals", C_TXT, C_BG, 2);
+    draw_table(264, 0, NCH);
     b[0] = 0;
     put_str(b, &n, "Sessions completed this boot: ");
     put_num(b, &n, sess[CH_REACT] + sess[CH_MEM] + sess[CH_MATH]);
-    gfx_draw_string(20, 482, b, C_ACC, C_BG);
-    gfx_draw_string(20, 500, "Sources: vitals SIMULATED | sugar, mood ENTERED by you | tests MEASURED from you", C_DIM, C_BG);
-    if (demo_active) gfx_draw_string(20, 464, "DEMO HISTORY (SIMULATED) is loaded - those entries are not real measurements.", C_AMBER, C_BG);
-    draw_attention(520);
-    draw_footer("1-5: choose  D: demo history  Esc: close");
+    gfx_draw_string(20, 430, b, C_ACC, C_BG);
+    gfx_draw_string(20, 448, "Sources: vitals, sugar, mood ENTERED by you | tests MEASURED from you | demo SIMULATED", C_DIM, C_BG);
+    if (demo_active) gfx_draw_string(20, 466, "DEMO HISTORY (SIMULATED) is loaded - those entries are not real measurements.", C_AMBER, C_BG);
+    draw_attention(490);
+    draw_footer("1-6: choose  D: demo  Esc: close");
 }
 
 static void draw_guide(void)
@@ -534,6 +547,77 @@ static void draw_math(void)
     draw_footer("0-9 type  Bksp fix  Enter answer  Esc menu");
 }
 
+/* ---- vitals typed in by the astronaut (same path as the serial lines: sensor_feed) ---- */
+#define VITAL_LOCK_N 10      /* vigil.c LOCK_AFTER: readings before a vital's baseline locks */
+typedef struct { const char *name, *unit, *wire; char kind; int tenths; } vitcfg_t;
+static const vitcfg_t vitcfg[5] = {
+    { "Heart rate",               "bpm",  "hr",    'h', 0 },
+    { "SpO2",                     "%",    "spo2",  'o', 0 },
+    { "Blood pressure (systolic)", "mmHg", "bp",   'p', 0 },
+    { "Body temperature",         "C",    "temp",  't', 1 },
+    { "Sleep last night",         "hours","sleep", 's', 1 },
+};
+
+static void fmt_vit(char *b, unsigned int *n, int i, unsigned int v)
+{
+    if (vitcfg[i].tenths) { put_num(b, n, v / 10); put_str(b, n, "."); put_num(b, n, v % 10); }
+    else put_num(b, n, v);
+}
+
+static void draw_vit(void)
+{
+    char b[80]; unsigned int n;
+    gfx_draw_string(20, 124, "ENTER VITALS  (ENTERED BY THE ASTRONAUT)", C_ACC, C_BG);
+    if (st == S_VIT) {
+        n = 0; b[0] = 0;
+        put_str(b, &n, "Vital "); put_num(b, &n, vit_idx + 1); put_str(b, &n, " of 5: "); put_str(b, &n, vitcfg[vit_idx].name);
+        gfx_draw_string_scaled(20, 148, b, C_TXT, C_BG, 2);
+        n = 0; b[0] = 0;
+        for (unsigned int k = 0; k < ilen; k++) b[n++] = ibuf[k];
+        b[n++] = '_'; b[n] = 0;
+        gfx_draw_string_scaled(40, 190, b, C_TXT, C_BG, 4);
+        n = 0; b[0] = 0;
+        if (vitcfg[vit_idx].tenths) {
+            unsigned int v = 0;
+            for (unsigned int k = 0; k < ilen; k++) v = v * 10 + (unsigned int)(ibuf[k] - '0');
+            if (ilen > 0) { fmt_vit(b, &n, (int)vit_idx, v); put_str(b, &n, " "); put_str(b, &n, vitcfg[vit_idx].unit); }
+            else put_str(b, &n, vit_idx == 3 ? "type tenths: 366 means 36.6 C" : "type tenths: 75 means 7.5 hours");
+        } else {
+            put_str(b, &n, vitcfg[vit_idx].unit);
+        }
+        gfx_draw_string(300, 214, b, C_DIM, C_BG);
+        gfx_draw_string(20, 262, "Type the value you measured, then press Enter. Enter with nothing typed skips this vital.", C_DIM, C_BG);
+    } else {
+        gfx_draw_string_scaled(20, 148, "ENTRIES SAVED", C_OK, C_BG, 2);
+        gfx_draw_string(20, 190, "Press Space to enter another set, Esc for the menu.", C_DIM, C_BG);
+    }
+    gfx_draw_string(20, 292, "VITAL", C_DIM, C_BG);
+    gfx_draw_string(250, 292, "LAST ENTERED", C_DIM, C_BG);
+    gfx_draw_string(400, 292, "STATUS vs YOUR OWN BASELINE", C_DIM, C_BG);
+    for (int i = 0; i < 5; i++) {
+        unsigned int y = 314 + (unsigned int)i * 28;
+        int locked = vigil_vital_locked(vitcfg[i].kind);
+        level_t l = vigil_vital_level(vitcfg[i].kind);
+        unsigned int col = !locked ? C_DIM : l == LVL_RED ? C_FAULT : l == LVL_AMBER ? C_AMBER : C_OK;
+        gfx_fill_rect(16, y - 3, 768, 26, C_PANEL);
+        gfx_draw_string(20, y + 3, vitcfg[i].name, C_TXT, C_PANEL);
+        n = 0; b[0] = 0;
+        if (vit_val[i]) { fmt_vit(b, &n, i, vit_val[i]); put_str(b, &n, " "); put_str(b, &n, vitcfg[i].unit); }
+        else put_str(b, &n, "--");
+        gfx_draw_string(250, y + 3, b, C_TXT, C_PANEL);
+        n = 0; b[0] = 0;
+        if (!locked) {
+            put_str(b, &n, "Learning baseline: entries this boot "); put_num(b, &n, vit_cnt[i]);
+            put_str(b, &n, " (locks after "); put_num(b, &n, VITAL_LOCK_N); put_str(b, &n, ")");
+        } else put_str(b, &n, l == LVL_RED ? "RED" : l == LVL_AMBER ? "AMBER" : "GREEN");
+        gfx_fill_rect(400, y + 3, 12, 12, col);
+        gfx_draw_string(418, y + 3, b, col, C_PANEL);
+    }
+    gfx_draw_string(20, 470, "Compared only with your own baseline (demo thresholds). Follow mission medical procedures;", C_DIM, C_BG);
+    gfx_draw_string(20, 488, "report to the flight surgeon if a status stays AMBER or RED.", C_DIM, C_BG);
+    draw_footer("0-9 type  Bksp fix  Enter save  Esc menu");
+}
+
 static void draw_all(void)
 {
     if (st == S_R_WAIT || st == S_R_GO) { draw_react(); return; }
@@ -549,6 +633,7 @@ static void draw_all(void)
     case S_R_IDLE: case S_R_MSG: case S_R_DONE: draw_react(); break;
     case S_M_IDLE: case S_M_SHOW: case S_M_INPUT: case S_M_DONE: draw_mem(); break;
     case S_Q_IDLE: case S_Q: case S_Q_DONE: draw_math(); break;
+    case S_VIT: case S_VIT_DONE: draw_vit(); break;
     default: break;
     }
 }
@@ -590,6 +675,8 @@ static void load_demo(void)
 }
 
 int astro_demo_active(void) { return demo_active; }
+int astro_vit_sim(void) { return vit_sim; }
+void astro_set_vit_sim(int v) { vit_sim = v; }
 
 static void to_menu(void) { st = S_MENU; dirty = 1; }
 
@@ -663,6 +750,7 @@ void astro_key(char c)
         else if (c == '4') { st = S_M_IDLE; rng ^= now; dirty = 1; }
         else if (c == '5') { st = S_Q_IDLE; rng ^= now; dirty = 1; }
         else if (c == 'd') { load_demo(); dirty = 1; }
+        else if (c == '6') { st = S_VIT; vit_idx = 0; ilen = 0; dirty = 1; }
         break;
     case S_GUIDE:
         if (c == 0x12 || c == 'n') { guide_page = (guide_page + 1) % GUIDE_PAGES; dirty = 1; }
@@ -720,6 +808,30 @@ void astro_key(char c)
                 st = S_M_DONE; dirty = 1;
             }
         }
+        break;
+    case S_VIT:
+        if (c >= '0' && c <= '9' && ilen < 3) { ibuf[ilen++] = c; dirty = 1; }
+        else if (c == '\b' && ilen > 0) { ilen--; dirty = 1; }
+        else if (c == '\n') {
+            unsigned int v = 0;
+            for (unsigned int k = 0; k < ilen; k++) v = v * 10 + (unsigned int)(ibuf[k] - '0');
+            if (ilen > 0 && v == 0) break;                     /* 0 is not a reading: type again or skip */
+            if (ilen > 0) {
+                /* same path as a serial line: 'h072\n' */
+                sensor_feed(vitcfg[vit_idx].kind);
+                sensor_feed((char)('0' + v / 100)); sensor_feed((char)('0' + (v / 10) % 10)); sensor_feed((char)('0' + v % 10));
+                sensor_feed('\n');
+                vit_val[vit_idx] = v; vit_cnt[vit_idx]++;
+                vit_sim = 0;
+                ser_str("VIT "); ser_str(vitcfg[vit_idx].wire); ser_str(" "); ser_num(v); ser_str("\n");
+            }
+            ilen = 0; vit_idx++;
+            if (vit_idx >= 5) st = S_VIT_DONE;
+            dirty = 1;
+        }
+        break;
+    case S_VIT_DONE:
+        if (c == ' ') { st = S_VIT; vit_idx = 0; ilen = 0; dirty = 1; }
         break;
     case S_Q_IDLE:
     case S_Q_DONE:

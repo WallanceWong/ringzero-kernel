@@ -57,6 +57,8 @@ static void do_fault(void)                       /* one fault, logged */
 static char sline[8];
 static int  sn = 0;
 
+static void draw_badge(void);
+
 static void serial_poll(void)
 {
     while (inb(0x3F8 + 5) & 1) {                 /* UART has a byte waiting */
@@ -71,6 +73,10 @@ static void serial_poll(void)
         } else if (sn == 4) {                    /* a vitals line: sensor_feed checks it */
             for (int i = 0; i < 4; i++) sensor_feed(sline[i]);
             sensor_feed('\n');
+            if (!astro_vit_sim()) {                  /* a serial feed (simulator) is now the source */
+                astro_set_vit_sim(1);
+                if (!astro_is_open()) draw_badge();
+            }
         }                                        /* w1 / w0 and anything else: ignored */
         sn = 0;
     }
@@ -132,6 +138,18 @@ static void panel(unsigned int x, unsigned int y, unsigned int w, unsigned int h
     gfx_draw_string(x + 14, y + 8, title, C_ACC, C_PANEL);
 }
 
+/* permanent honesty badge: vitals are typed in by the astronaut unless a serial feed is seen */
+static void draw_badge(void)
+{
+    gfx_fill_rect(508, 20, 280, 48, C_AMBER);
+    if (astro_vit_sim()) {
+        gfx_draw_string_scaled(512, 28, "VITALS: SIMULATED", C_BG, C_AMBER, 2);
+    } else {
+        gfx_draw_string_scaled(512, 21, "VITALS: ENTERED", C_BG, C_AMBER, 2);
+        gfx_draw_string(512, 51, "BY THE ASTRONAUT", C_BG, C_AMBER);
+    }
+}
+
 /* ---- parts drawn once ---- */
 static void draw_frame(void)
 {
@@ -145,8 +163,7 @@ static void draw_frame(void)
     gfx_draw_string(8, 70, "HEARTBEAT", C_DIM, C_HDR);
 
     /* permanent honesty badge */
-    gfx_fill_rect(508, 20, 280, 48, C_AMBER);
-    gfx_draw_string_scaled(512, 28, "VITALS: SIMULATED", C_BG, C_AMBER, 2);
+    draw_badge();
 
     /* panels */
     panel(20,  104, 388, 196, "PROTECTED BASELINE - HEART RATE");

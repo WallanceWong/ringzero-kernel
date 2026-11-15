@@ -83,9 +83,11 @@
             color: #8899a6;
             z-index: 10;
         }
-        .astro { margin-top:10px; padding:8px 12px; background:#111a28; border:1px solid #1f334a; border-radius:8px; font-size:13px; color:#8899a6; }
+        .astro { margin-top:6px; padding:5px 12px; background:#111a28; border:1px solid #1f334a; border-radius:8px; font-size:16px; color:#8899a6; white-space:nowrap; overflow:hidden; }
         .astro b { color:#e0e0e0; }
-        .achip { display:inline-block; margin:4px 8px 0 0; padding:3px 8px; border:1px solid #1f334a; border-radius:6px; color:#e0e0e0; }
+        .astro .atitle { font-size:19px; color:#00ffcc; }
+        #achips { font-size:16px; margin-top:0; }
+        .achip { display:inline-block; margin:3px 8px 0 0; padding:3px 10px; border:1px solid #1f334a; border-radius:8px; color:#e0e0e0; font-size:16px; font-weight:bold; }
         .chart-box, .metric-panel { min-width: 0; }   /* let charts shrink in a narrow window */
     </style>
 </head>
@@ -94,11 +96,11 @@
     <div class="header">
         <h1>A1-37 VIGIL // MODULAR DASHBOARD</h1>
         <div style="display:flex;align-items:center;">
-            <div class="sim-badge">VITALS: SIMULATED</div>
+            <div class="sim-badge" id="vbadge">VITALS: --</div>
             <div class="status-badge" id="sys-status">⚪ OFFLINE</div>
         </div>
     </div>
-    <div class="linkbar">KERNEL LINK: <b id="link">NOT CONNECTED</b> &nbsp;|&nbsp; faults injected: <b id="kinj">-</b> &nbsp;|&nbsp; repaired: <b id="kfix">-</b> &nbsp;|&nbsp; all vitals are simulated and sent to the kernel by bridge.py</div>
+    <div class="linkbar">KERNEL LINK: <b id="link">NOT CONNECTED</b> &nbsp;|&nbsp; faults injected: <b id="kinj">-</b> &nbsp;|&nbsp; repaired: <b id="kfix">-</b> &nbsp;|&nbsp; <span id="vnote">vitals: waiting for the kernel</span></div>
 
     <div class="dashboard-grid">
         <!-- Panel 1: Heart Rate -->
@@ -193,7 +195,7 @@
     </div>
 
     <div class="astro" id="astro">
-        <b>Astronaut console</b> (from the kernel; sugar and mood ENTERED by the astronaut, tests MEASURED) &nbsp;|&nbsp; faults injected: <b id="ainj">0</b> &nbsp;|&nbsp; repaired: <b id="afix">0</b> <span id="ademo" style="color:#ff9800"></span>
+        <b class="atitle">Astronaut console</b> (from the kernel) &nbsp;|&nbsp; injected: <b id="ainj">0</b> &nbsp;|&nbsp; repaired: <b id="afix">0</b> <span id="ademo" style="color:#ff9800"></span>
         <div id="achips">no check-in or test yet</div>
     </div>
 
@@ -285,21 +287,21 @@
                 document.getElementById('link').innerText = d.frozen ? 'KERNEL FROZEN' : 'LIVE FROM KERNEL';
                 document.getElementById('kinj').innerText = d.inj;
                 document.getElementById('kfix').innerText = d.fix;
-                if (d.n !== lastN && d.sim_hr != null) {
+                document.getElementById('vbadge').innerText = d.vsrc === 'sim' ? 'VITALS: SIMULATED' : 'VITALS: ENTERED';
+                document.getElementById('vnote').innerText = d.vsrc === 'sim' ? 'all vitals are simulated and sent to the kernel by bridge.py (--sim)' : 'vitals are typed in by the astronaut on the kernel console';
+                if (d.n !== lastN) {
                     lastN = d.n;
-                    document.getElementById('hr-val').innerText = d.sim_hr;
-                    document.getElementById('spo2-val').innerText = d.o2;
-                    document.getElementById('temp-val').innerText = (d.t10 / 10).toFixed(1);
-                    document.getElementById('bp-val').innerText = d.bp;
-                    document.getElementById('sleep-val').innerText = (d.sl / 10).toFixed(1);
-                    pushAll('hr', d.sim_hr); pushAll('spo2', d.o2); pushAll('temp', d.t10 / 10);
-                    pushAll('bp', d.bp); pushAll('sleep', d.sl / 10);
+                    if (d.sim_hr != null) { document.getElementById('hr-val').innerText = d.sim_hr; pushAll('hr', d.sim_hr); }
+                    if (d.o2 != null) { document.getElementById('spo2-val').innerText = d.o2; pushAll('spo2', d.o2); }
+                    if (d.t10 != null) { document.getElementById('temp-val').innerText = (d.t10 / 10).toFixed(1); pushAll('temp', d.t10 / 10); }
+                    if (d.bp != null) { document.getElementById('bp-val').innerText = d.bp; pushAll('bp', d.bp); }
+                    if (d.sl != null) { document.getElementById('sleep-val').innerText = (d.sl / 10).toFixed(1); pushAll('sleep', d.sl / 10); }
                 }
                 const ac = {GREEN:'#00ffcc', AMBER:'#ff9800', RED:'#ff4d4d', BASELINE:'#8899a6'};
                 document.getElementById('ainj').innerText = d.ainj; document.getElementById('afix').innerText = d.afix;
-                document.getElementById('ademo').innerText = d.demo ? '| includes DEMO HISTORY (SIMULATED)' : '';
+                document.getElementById('ademo').innerText = d.demo ? '| dashed = DEMO' : '';
                 const an = Object.keys(d.astro || {});
-                if (an.length) document.getElementById('achips').innerHTML = an.map(k => '<span class="achip" style="border-color:' + (ac[d.astro[k].lvl] || '#1f334a') + '">' + k + ' ' + d.astro[k].v + ' <span style="color:' + (ac[d.astro[k].lvl] || '#8899a6') + '">' + d.astro[k].lvl + '</span>' + (d.astro[k].sim ? ' SIM' : '') + '</span>').join('');
+                if (an.length) document.getElementById('achips').innerHTML = an.map(k => '<span class="achip" style="border-style:' + (d.astro[k].sim ? 'dashed' : 'solid') + ';border-color:' + (ac[d.astro[k].lvl] || '#1f334a') + '">' + k + ' ' + d.astro[k].v + ' <span style="color:' + (ac[d.astro[k].lvl] || '#8899a6') + '">' + d.astro[k].lvl + '</span>' + '</span>').join('');
                 for (const e of d.events) { if (e.type === 'REPLAY') playReplay(); }
             } catch (err) { connected = false; document.getElementById('link').innerText = 'NOT CONNECTED'; }
             if (!connected) badge('⚪ OFFLINE', '#8899a6');

@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """A1-37 VIGIL bridge: simulator + kernel telemetry -> Ground Station.
 
-usage: python3 bridge.py /dev/pts/N
-- sends SIMULATED vitals to the kernel (h072 / o098 / t366), one set per second
+usage: python3 bridge.py /dev/pts/N [--sim]
+- default: vitals are typed in by the astronaut on the kernel console; the kernel reports them as "VIT hr 72" lines
+- with --sim: also sends SIMULATED vitals to the kernel (h072 / o098 / t366), one set per second
 - reads the kernel's own telemetry lines (INJ / EVT / REPLAY / RUN / FREEZE, plus CHK / COG / AINJ / AEVT / DEMO from the astronaut console)
 - serves them on http://127.0.0.1:8037/events for ground_station.html
-Nothing here is a real sensor. All vitals are simulated.
+Nothing here is a real sensor. Vitals are either typed in by the astronaut or (with --sim) simulated.
 """
 import os, sys, time, json, random, threading, termios, tty
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-port = sys.argv[1]
+SIM = "--sim" in sys.argv
+port = [a for a in sys.argv[1:] if not a.startswith("--")][0]
 fd = os.open(port, os.O_RDWR | os.O_NOCTTY)
 try: tty.setraw(fd)
 except Exception: pass
 
 lock = threading.Lock()
 events = []                       # {"id","type","text"}
-state = {"inj": 0, "fix": 0, "frozen": False, "sim_hr": None, "paused_until": 0.0, "n": 0, "o2": None, "t10": None, "bp": None, "sl": None, "astro": {}, "ainj": 0, "afix": 0, "demo": False}
+state = {"inj": 0, "fix": 0, "frozen": False, "sim_hr": None, "paused_until": 0.0, "n": 0, "o2": None, "t10": None, "bp": None, "sl": None, "vsrc": ("sim" if SIM else "entered"), "astro": {}, "ainj": 0, "afix": 0, "demo": False}
 
 def add(t, text):
     with lock:
@@ -41,6 +43,12 @@ def handle(line):
         if len(p) >= 4:
             with lock: state["astro"][p[1]] = {"v": p[2], "lvl": p[3], "sim": len(p) > 4, "kind": p[0]}
         add("ASTRO", line)
+    elif line.startswith("VIT "):                    # vital typed in by the astronaut: VIT hr 72
+        p = line.split()
+        key = {"hr": "sim_hr", "spo2": "o2", "temp": "t10", "bp": "bp", "sleep": "sl"}.get(p[1]) if len(p) == 3 else None
+        if key and p[2].isdigit():
+            with lock: state[key] = int(p[2]); state["n"] += 1
+        add("VIT", line)
     elif line.startswith("AINJ"):
         with lock: state["ainj"] += 1
         add("AINJ", line)
@@ -72,7 +80,7 @@ def sender():
     r1, r2 = random.Random(37), random.Random(38)
     while True:
         with lock: paused = time.time() < state["paused_until"]; frozen = state["frozen"]
-        if not paused and not frozen:
+        if SIM and not paused and not frozen:
             hr = 72 + r1.choice([-1, 0, 1])
             o2 = 98 + r2.choice([-1, 0, 0, 1])
             t10 = 366 + r1.choice([-1, 0, 1])
@@ -98,7 +106,7 @@ class H(BaseHTTPRequestHandler):
                                "last": len(events), "inj": state["inj"], "fix": state["fix"],
                                "frozen": state["frozen"], "sim_hr": state["sim_hr"],
                                "o2": state["o2"], "t10": state["t10"], "bp": state["bp"], "sl": state["sl"], "n": state["n"],
-                               "astro": state["astro"], "ainj": state["ainj"], "afix": state["afix"], "demo": state["demo"]}).encode()
+                               "astro": state["astro"], "ainj": state["ainj"], "afix": state["afix"], "demo": state["demo"], "vsrc": state["vsrc"]}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
