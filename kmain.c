@@ -327,17 +327,37 @@ static void draw_replay(void)
     gfx_fill_rect(436, 432, pw, 12, C_AMBER);
 }
 
+/* astronaut-console results on the main screen: CHECK-IN DUE and GROUND ATTENTION */
+static void draw_astro_lines(void)
+{
+    char b[120];
+    int lv = 0;
+    unsigned int now = timer_ticks();
+
+    gfx_fill_rect(508, 70, 280, 16, C_HDR);
+    if (astro_checkin_due(now))
+        gfx_draw_string(508, 70, "CHECK-IN DUE  (press M)", C_AMBER, C_HDR);
+
+    gfx_fill_rect(22, 536, 756, 20, C_PANEL);
+    if (astro_attention(now, b, sizeof b, &lv)) {
+        gfx_draw_string(34, 538, "GROUND ATTENTION:", lv == 2 ? C_FAULT : C_AMBER, C_PANEL);
+        gfx_draw_string(34 + 18 * 8, 538, b, lv == 2 ? C_FAULT : C_AMBER, C_PANEL);
+    } else {
+        gfx_draw_string(34, 538, "GROUND ATTENTION: No indicator needs attention.", C_DIM, C_PANEL);
+    }
+}
+
 static void draw_guidance(void)
 {
     level_t l = vigil_level();
 
-    gfx_fill_rect(22, 504, 756, 54, C_PANEL);
+    gfx_fill_rect(22, 500, 756, 36, C_PANEL);
     if (l == LVL_AMBER) {
-        gfx_draw_string_scaled(34, 514, "Rest, hydrate, re-measure within 24 hours", C_AMBER, C_PANEL, 2);
+        gfx_draw_string_scaled(34, 502, "Rest, hydrate, re-measure within 24 hours", C_AMBER, C_PANEL, 2);
     } else if (l == LVL_RED) {
-        gfx_draw_string_scaled(34, 514, "Contact the flight surgeon", C_FAULT, C_PANEL, 2);
+        gfx_draw_string_scaled(34, 502, "Contact the flight surgeon", C_FAULT, C_PANEL, 2);
     } else {
-        gfx_draw_string_scaled(34, 514, "Continue routine monitoring", C_OK, C_PANEL, 2);
+        gfx_draw_string_scaled(34, 502, "Continue routine monitoring", C_OK, C_PANEL, 2);
     }
 }
 
@@ -349,6 +369,7 @@ static void draw_status(void)
     draw_event();
     draw_replay();
     draw_guidance();
+    draw_astro_lines();
 }
 
 /* ---- main ---- */
@@ -393,6 +414,8 @@ int kmain(unsigned int *mbi)
                 ser_str("FREEZE\n");
                 __asm__ volatile ("cli");
                 for (;;) __asm__ volatile ("hlt");
+            } else if (c == 'i') {                            /* fault into the astronaut channels */
+                astro_inject_fault();
             } else if (c == 'm' && !astro_is_open()) {         /* open the astronaut console */
                 astro_open();
             } else if (astro_is_open()) {                     /* console owns the keyboard */
@@ -438,6 +461,7 @@ int kmain(unsigned int *mbi)
         if (timer_ticks() - last_scrub >= 100) {
             last_scrub += 100;
             if (!replay_on && !replay_done) draw_vitals();
+            astro_scrub(timer_ticks());
             if (vigil_scrub(timer_ticks()) > 0) {
                 fix_count++;
                 draw_event();
@@ -459,6 +483,8 @@ int kmain(unsigned int *mbi)
             blink_on ^= 1;
             gfx_fill_rect(20, 20, 48, 48, blink_on ? 0x00FFFFFF : 0x00000000);
         }
+
+        if (astro_take_dirty() && !astro_is_open()) draw_astro_lines();
 
         int bc; uint32_t bb, bg;
         int on = vigil_event_active(timer_ticks(), &bc, &bb, &bg);

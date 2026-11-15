@@ -3,12 +3,15 @@
  * astro_tick() is called every main-loop pass (PIT time), astro_draw()
  * repaints only when something changed. Nothing here ever waits. */
 #include "astro.h"
+#include "tmr.h"
 
 void gfx_fill_rect(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int color);
 void gfx_draw_string(unsigned int x, unsigned int y, const char *s, unsigned int fg, unsigned int bg);
 void gfx_draw_string_scaled(unsigned int x, unsigned int y, const char *s,
                             unsigned int fg, unsigned int bg, unsigned int scale);
 unsigned int timer_ticks(void);
+int serial_write(unsigned short com, char *buf, unsigned int len);
+unsigned int strlen(const char *s);
 
 extern unsigned int sensor_hr, sensor_spo2, sensor_temp, sensor_bp, sensor_sleep;
 
@@ -24,14 +27,55 @@ extern unsigned int sensor_hr, sensor_spo2, sensor_temp, sensor_bp, sensor_sleep
 #define C_FAULT  0x00FF4040u
 #define C_OK     0x0000FF00u
 
-typedef enum {
-    S_CLOSED, S_MENU, S_GUIDE
-} astate_t;
+#define C_GRN_BG 0x00007A2Au
+#define C_WAIT   0x00502020u
 
-static astate_t st = S_CLOSED;
-static int dirty = 0;               /* console needs a full repaint */
-static int guide_page = 0;
-static unsigned int last_strip = 0;
+/* ===== DEMO VALUES (one place) =====
+ * Every channel is compared with the person's OWN baseline.
+ * These percentages are demo values, not clinical limits. */
+#define AMBER_PCT        10      /* rolling median 10% worse than own baseline -> AMBER */
+#define RED_PCT          25      /* 25% worse -> RED */
+#define BASE_N_CHECKIN    5      /* baseline = median of the first 5 check-in entries */
+#define BASE_N_TEST       3      /* baseline = median of the first 3 test sessions */
+#define ROLL_N            3      /* status uses the median of the last 3 entries */
+#define CHECKIN_INTERVAL_TICKS 12000u   /* demo reminder: 120 s of uptime (100 ticks = 1 s) */
+#define REACT_TRIALS      5
+#define MATH_QUESTIONS    5
+#define MEM_MAX           12
+
+enum { CH_SUGAR, CH_MOOD, CH_REACT, CH_MEM, CH_MATH, NCH };
+#define HIST 8                   /* in-RAM history per channel; lost on reboot */
+
+typedef struct {
+    const char *name, *label, *unit, *tag, *phrase;
+    int base_n;
+    int dir;                     /* 0 = either way is worse, 1 = higher is worse, 2 = lower is worse */
+} chcfg_t;
+
+static const chcfg_t chcfg[NCH] = {
+    { "sugar",    "Blood sugar", "mg/dL", "ENTERED", "Blood sugar differs from your baseline",   BASE_N_CHECKIN, 0 },
+    { "mood",     "Mood",        "/5",    "ENTERED", "Mood lower than your baseline",            BASE_N_CHECKIN, 2 },
+    { "reaction", "Reaction",    "ms",    "MEASURED","Reaction slower than your baseline",       BASE_N_TEST,    1 },
+    { "memory",   "Memory",      "steps", "MEASURED","Memory score below your baseline",         BASE_N_TEST,    2 },
+    { "math",     "Mental math", "/5",    "MEASURED","Math score below your baseline",           BASE_N_TEST,    2 },
+};
+
+/* all values live in TMR storage: 3 copies, voted on read, repaired by the scrubber */
+static tmr_u32      ring[NCH][HIST];
+static tmr_u32      base_t[NCH];
+static tmr_u32      best_t[NCH];
+static unsigned int cnt[NCH];            /* entries ever saved (history position) */
+static unsigned int sess[NCH];           /* sessions/entries saved this boot */
+static int          base_set[NCH];
+static unsigned int last_checkin = 0;    /* PIT tick of last check-in (0 = boot) */
+static unsigned int a_inj = 0, a_fix = 0;
+static int          inj_next = 0, inj_copy = 0;
+static int          main_dirty = 0;
+
+typedef enum {
+    S_CLOSED, S_MENU, S_GUIDE, S_SUGAR, S_MOOD, S_CI_DONE,
+    S_R_IDLE, S_R_WAIT, S_R_GO, S_R_MSG, S_R_DONE
+} astate_t;
 
 /* ---- small text helpers (no printf in this kernel) ---- */
 static void put_num(char *dst, unsigned int *n, unsigned int v)
@@ -49,12 +93,128 @@ static void put_str(char *dst, unsigned int *n, const char *s)
     dst[*n] = 0;
 }
 
+/* ---- serial telemetry (own tiny helpers; same style as the existing lines) ---- */
+static void ser_str(const char *x) { serial_write(0x3F8, (char *)x, strlen(x)); }
+static void ser_num(unsigned int v)
+{
+    char b[12]; unsigned int n = 0;
+    b[0] = 0; put_num(b, &n, v); ser_str(b);
+}
+
+/* ---- channel logic: store, baseline, status (reuses tmr.c; no second voter) ---- */
+static unsigned int chan_get(int ch, unsigned int k)      /* k-th newest entry (0 = latest) */
+{
+    return tmr_read(&ring[ch][(cnt[ch] - 1 - k) % HIST], 0);
+}
+
+static void sort_u(unsigned int *a, int n)
+{
+    for (int i = 1; i < n; i++) {
+        unsigned int k = a[i]; int j = i - 1;
+        while (j >= 0 && a[j] > k) { a[j + 1] = a[j]; j--; }
+        a[j + 1] = k;
+    }
+}
+
+/* -1 = building baseline, 0 = GREEN, 1 = AMBER, 2 = RED */
+static int chan_level(int ch)
+{
+    if (cnt[ch] < (unsigned int)chcfg[ch].base_n || !base_set[ch]) return -1;
+    int b = (int)tmr_read(&base_t[ch], 0);
+    unsigned int t[ROLL_N];
+    for (int k = 0; k < ROLL_N; k++) t[k] = chan_get(ch, (unsigned int)k);
+    sort_u(t, ROLL_N);
+    int med = (int)t[ROLL_N / 2];
+    int d = med - b;
+    int bad = (chcfg[ch].dir == 0) ? (d < 0 ? -d : d) : (chcfg[ch].dir == 1 ? d : -d);
+    if (b <= 0 || bad <= 0) return 0;
+    if (bad * 100 >= b * RED_PCT) return 2;
+    if (bad * 100 >= b * AMBER_PCT) return 1;
+    return 0;
+}
+
+static const char *level_word(int l)
+{
+    return l < 0 ? "BASELINE" : l == 0 ? "GREEN" : l == 1 ? "AMBER" : "RED";
+}
+
+static unsigned int level_col(int l)
+{
+    return l < 0 ? C_DIM : l == 0 ? C_OK : l == 1 ? C_AMBER : C_FAULT;
+}
+
+static void chan_add(int ch, unsigned int v)
+{
+    tmr_write(&ring[ch][cnt[ch] % HIST], v);
+    cnt[ch]++;
+    sess[ch]++;
+    if (cnt[ch] == (unsigned int)chcfg[ch].base_n) {         /* baseline = median of the first N entries */
+        unsigned int t[BASE_N_CHECKIN];
+        for (int k = 0; k < chcfg[ch].base_n; k++) t[k] = chan_get(ch, (unsigned int)k);
+        sort_u(t, chcfg[ch].base_n);
+        tmr_write(&base_t[ch], t[chcfg[ch].base_n / 2]);
+        base_set[ch] = 1;
+    }
+    /* best value: lowest reaction time; highest for the others (tests only) */
+    if (ch >= CH_REACT) {
+        unsigned int old = tmr_read(&best_t[ch], 0);
+        int better = (sess[ch] == 1) || (ch == CH_REACT ? v < old : v > old);
+        if (better) tmr_write(&best_t[ch], v);
+    }
+    int l = chan_level(ch);
+    ser_str(ch < CH_REACT ? "CHK " : "COG ");
+    ser_str(chcfg[ch].name); ser_str(" "); ser_num(v); ser_str(" ");
+    ser_str(level_word(l)); ser_str("\n");
+    main_dirty = 1;
+}
+
+/* one-line guidance for the main screen / console: first flagged channel after rotation */
+static int attn_build(unsigned int now, char *out, unsigned int cap, int *level)
+{
+    int flagged[NCH], nf = 0;
+    for (int ch = 0; ch < NCH; ch++)
+        if (chan_level(ch) >= 1) flagged[nf++] = ch;
+    if (nf == 0) return 0;
+    int ch = flagged[(now / 300) % (unsigned int)nf];
+    int l = chan_level(ch);
+    unsigned int n = 0;
+    out[0] = 0;
+    put_str(out, &n, chcfg[ch].phrase);
+    put_str(out, &n, ". ");
+    put_str(out, &n, l == 2 ? "Report to the flight surgeon now." : "Rest, repeat, report if it persists.");
+    if (n >= cap) out[cap - 1] = 0;
+    if (level) *level = l;
+    return nf;
+}
+
+/* ---- state ---- */
+static astate_t st = S_CLOSED;
+static int dirty = 0;               /* console needs a full repaint */
+static int guide_page = 0;
+static unsigned int last_strip = 0;
+static unsigned int rng = 12345;
+static char ibuf[8];                /* typed digits */
+static unsigned int ilen = 0;
+static unsigned int r_trial = 0, r_wait_until = 0, r_go_tick = 0;
+static unsigned int r_ms[REACT_TRIALS];
+static unsigned int r_result = 0;
+static int          r_early = 0;
+static int          prev_due = 0;
+static unsigned int prev_rot = 0;
+static unsigned int sugar_saved = 0;
+
+static unsigned int rnd(void)       /* LCG, seeded from PIT ticks at test start */
+{
+    rng = rng * 1103515245u + 12345u;
+    return rng >> 16;
+}
+
 /* ---- drawing ---- */
 static void draw_header(void)
 {
     gfx_fill_rect(0, 0, 800, 88, C_HDR);
     gfx_fill_rect(0, 88, 800, 2, C_ACC);
-    gfx_draw_string_scaled(100, 16, "ASTRONAUT CONSOLE", C_TXT, C_HDR, 3);
+    gfx_draw_string_scaled(100, 16, "ASTRO CONSOLE", C_TXT, C_HDR, 3);
     gfx_draw_string(100, 66, "A1-37 VIGIL  |  your own health check  |  keyboard only", C_DIM, C_HDR);
     gfx_draw_string(8, 70, "HEARTBEAT", C_DIM, C_HDR);
     gfx_fill_rect(508, 20, 280, 48, C_AMBER);
@@ -91,14 +251,84 @@ static void draw_footer(const char *hint)
     gfx_draw_string(440, 576, "General information, not medical advice.", C_DIM, C_BG);
 }
 
+/* table of the 5 astronaut channels: value, status colour, bar strip, source */
+static void draw_table(unsigned int y0, int from, int to)
+{
+    gfx_draw_string(20,  y0, "INDICATOR", C_DIM, C_BG);
+    gfx_draw_string(124, y0, "LATEST", C_DIM, C_BG);
+    gfx_draw_string(232, y0, "STATUS vs YOUR OWN BASELINE", C_DIM, C_BG);
+    gfx_draw_string(470, y0, "LAST 8", C_DIM, C_BG);
+    gfx_draw_string(590, y0, "SOURCE / SESSIONS / BEST", C_DIM, C_BG);
+    for (int ch = from; ch < to; ch++) {
+        unsigned int y = y0 + 22 + (unsigned int)(ch - from) * 28;
+        char b[48]; unsigned int n = 0;
+        int l = chan_level(ch);
+        gfx_fill_rect(16, y - 3, 768, 26, C_PANEL);
+        gfx_draw_string(20, y + 3, chcfg[ch].label, C_TXT, C_PANEL);
+        b[0] = 0;
+        if (cnt[ch] == 0) {
+            put_str(b, &n, "--");
+        } else {
+            put_num(b, &n, chan_get(ch, 0)); put_str(b, &n, " "); put_str(b, &n, chcfg[ch].unit);
+        }
+        gfx_draw_string(124, y + 3, b, C_TXT, C_PANEL);
+        n = 0; b[0] = 0;
+        if (cnt[ch] == 0) {
+            put_str(b, &n, "no data yet");
+        } else if (l < 0) {
+            put_str(b, &n, "Building baseline ("); put_num(b, &n, cnt[ch]);
+            put_str(b, &n, "/"); put_num(b, &n, (unsigned int)chcfg[ch].base_n); put_str(b, &n, ")");
+        } else {
+            put_str(b, &n, level_word(l));
+        }
+        gfx_fill_rect(232, y + 3, 12, 12, level_col(l));
+        gfx_draw_string(250, y + 3, b, level_col(l), C_PANEL);
+        /* bar strip: last 8 entries, oldest on the left */
+        unsigned int have = cnt[ch] < HIST ? cnt[ch] : HIST;
+        unsigned int mx = 1;
+        for (unsigned int k = 0; k < have; k++) { unsigned int v = chan_get(ch, k); if (v > mx) mx = v; }
+        for (unsigned int k = 0; k < have; k++) {
+            unsigned int v = chan_get(ch, have - 1 - k);
+            unsigned int h = 3 + (v * 17) / mx;
+            gfx_fill_rect(470 + k * 14, y + 20 - h, 10, h, l < 0 ? C_ACC : level_col(l));
+        }
+        n = 0; b[0] = 0;
+        put_str(b, &n, chcfg[ch].tag); put_str(b, &n, " n="); put_num(b, &n, sess[ch]);
+        if (ch >= CH_REACT && sess[ch] > 0) {
+            put_str(b, &n, " best "); put_num(b, &n, tmr_read(&best_t[ch], 0));
+        }
+        gfx_draw_string(590, y + 3, b, C_DIM, C_PANEL);
+    }
+}
+
+static void draw_attention(unsigned int y)
+{
+    char b[120]; int l = 0;
+    unsigned int now = timer_ticks();
+    if (attn_build(now, b, sizeof b, &l)) {
+        gfx_draw_string(20, y, "GROUND ATTENTION:", level_col(l), C_BG);
+        draw_wrapped(20, y + 18, b, 94, level_col(l), C_BG, 16);
+    } else {
+        gfx_draw_string(20, y, "GROUND ATTENTION: no indicator needs attention.", C_OK, C_BG);
+    }
+}
+
 static void draw_menu(void)
 {
+    char b[60]; unsigned int n = 0;
     gfx_draw_string(20, 124, "MENU", C_ACC, C_BG);
-    gfx_draw_string_scaled(40, 148, "1  Health guide", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 184, "2  Check-in", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 220, "3  Reaction test", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 256, "4  Memory test", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 292, "5  Mental math", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(40, 144, "1  Health guide", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(40, 174, "2  Check-in (blood sugar, mood)", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(40, 204, "3  Reaction test", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(40, 234, "4  Memory test  (soon)", C_DIM, C_BG, 2);
+    gfx_draw_string_scaled(40, 264, "5  Mental math  (soon)", C_DIM, C_BG, 2);
+    draw_table(304, 0, NCH);
+    b[0] = 0;
+    put_str(b, &n, "Sessions completed this boot: ");
+    put_num(b, &n, sess[CH_REACT] + sess[CH_MEM] + sess[CH_MATH]);
+    gfx_draw_string(20, 482, b, C_ACC, C_BG);
+    gfx_draw_string(20, 500, "Sources: vitals SIMULATED | sugar, mood ENTERED by you | tests MEASURED from you", C_DIM, C_BG);
+    draw_attention(520);
     draw_footer("1-5: choose    Esc: close console");
 }
 
@@ -127,14 +357,102 @@ static void draw_guide(void)
     draw_footer("Left/Right or N/P: page    Esc: menu");
 }
 
+static void draw_sugar(void)
+{
+    char b[8]; unsigned int i;
+    gfx_draw_string(20, 124, "CHECK-IN 1/2: BLOOD SUGAR  (ENTERED BY THE ASTRONAUT)", C_ACC, C_BG);
+    draw_wrapped(20, 150, "Type the value you measured, in mg/dL, then press Enter. Backspace fixes a digit. Press Enter with nothing typed to skip.", 94, C_TXT, C_BG, 18);
+    for (i = 0; i < ilen; i++) b[i] = ibuf[i];
+    b[ilen] = '_'; b[ilen + 1] = 0;
+    gfx_draw_string_scaled(40, 230, b, C_TXT, C_BG, 5);
+    gfx_draw_string_scaled(300, 250, "mg/dL", C_DIM, C_BG, 2);
+    draw_footer("0-9: type    Backspace: fix    Enter: save    Esc: menu");
+}
+
+static void draw_mood(void)
+{
+    char b[40]; unsigned int n = 0;
+    gfx_draw_string(20, 124, "CHECK-IN 2/2: MOOD  (ENTERED BY THE ASTRONAUT)", C_ACC, C_BG);
+    if (sugar_saved) {
+        put_str(b, &n, "Blood sugar saved: "); put_num(b, &n, sugar_saved); put_str(b, &n, " mg/dL");
+        gfx_draw_string(20, 146, b, C_OK, C_BG);
+    }
+    draw_wrapped(20, 176, "How do you feel right now? Press a key from 1 to 5.", 94, C_TXT, C_BG, 18);
+    for (int k = 1; k <= 5; k++) {
+        char d[2] = { (char)('0' + k), 0 };
+        gfx_fill_rect(40 + (unsigned int)(k - 1) * 140, 230, 120, 120, C_PANEL);
+        gfx_draw_string_scaled(84 + (unsigned int)(k - 1) * 140, 262, d, C_TXT, C_PANEL, 6);
+    }
+    gfx_draw_string(40, 366, "1 = low", C_DIM, C_BG);
+    gfx_draw_string(600, 366, "5 = good", C_DIM, C_BG);
+    draw_footer("1-5: mood    Esc: menu");
+}
+
+static void draw_ci_done(void)
+{
+    gfx_draw_string(20, 124, "CHECK-IN SAVED", C_OK, C_BG);
+    draw_table(160, 0, 2);
+    gfx_draw_string(20, 260, "Values are compared only with your own earlier entries (demo thresholds).", C_DIM, C_BG);
+    gfx_draw_string(20, 280, "Follow mission medical procedures. Report to the flight surgeon if a status stays AMBER or RED.", C_DIM, C_BG);
+    draw_attention(320);
+    draw_footer("Esc: menu");
+}
+
+static void draw_react(void)
+{
+    char b[64]; unsigned int n;
+    if (st == S_R_WAIT) {
+        gfx_fill_rect(0, 90, 800, 480, C_WAIT);
+        draw_header();
+        gfx_draw_string_scaled(200, 280, "WAIT FOR GREEN...", C_TXT, C_WAIT, 4);
+        gfx_draw_string(20, 576, "Do not press yet. Esc: stop", C_DIM, C_BG);
+        return;
+    }
+    if (st == S_R_GO) {
+        gfx_fill_rect(0, 90, 800, 480, C_GRN_BG);
+        draw_header();
+        gfx_draw_string_scaled(180, 270, "PRESS SPACE NOW", C_TXT, C_GRN_BG, 5);
+        return;
+    }
+    gfx_draw_string(20, 124, "REACTION TEST  (MEASURED from you)", C_ACC, C_BG);
+    if (st == S_R_MSG) {
+        gfx_draw_string_scaled(20, 160, "TOO EARLY", C_FAULT, C_BG, 3);
+        draw_wrapped(20, 214, "That trial is repeated. Wait for the screen to turn green, then press Space. Press Space to try again.", 94, C_TXT, C_BG, 18);
+    } else if (st == S_R_IDLE) {
+        n = 0; b[0] = 0;
+        put_str(b, &n, "Trial "); put_num(b, &n, r_trial + 1); put_str(b, &n, " of 5. Press SPACE to start.");
+        gfx_draw_string_scaled(20, 156, b, C_TXT, C_BG, 2);
+        draw_wrapped(20, 200, "After a random wait of 1.5 to 4 seconds the screen turns GREEN. Then press Space as fast as you can. Pressing too early repeats the trial.", 94, C_DIM, C_BG, 18);
+    } else {
+        gfx_draw_string_scaled(20, 156, "SESSION DONE", C_OK, C_BG, 3);
+        n = 0; b[0] = 0;
+        put_str(b, &n, "Result: "); put_num(b, &n, r_result); put_str(b, &n, " ms (median of 5 trials)");
+        gfx_draw_string_scaled(20, 210, b, C_TXT, C_BG, 2);
+    }
+    for (unsigned int k = 0; k < r_trial && k < REACT_TRIALS; k++) {
+        n = 0; b[0] = 0;
+        put_str(b, &n, "Trial "); put_num(b, &n, k + 1); put_str(b, &n, ": "); put_num(b, &n, r_ms[k]); put_str(b, &n, " ms");
+        gfx_draw_string(20, 250 + k * 18, b, C_TXT, C_BG);
+    }
+    gfx_draw_string(20, 346, "Timer resolution: 10 ms (PIT 100 Hz). Higher = slower. Compared only with your own baseline.", C_DIM, C_BG);
+    if (st == S_R_DONE) draw_table(376, CH_REACT, CH_REACT + 1);
+    if (st == S_R_DONE) draw_attention(436);
+    draw_footer(st == S_R_DONE ? "Space: run again    Esc: menu" : "Space: continue    Esc: menu");
+}
+
 static void draw_all(void)
 {
+    if (st == S_R_WAIT || st == S_R_GO) { draw_react(); return; }
     gfx_fill_rect(0, 90, 800, 480, C_BG);
     draw_header();
     draw_strip();
     switch (st) {
-    case S_MENU:  draw_menu();  break;
-    case S_GUIDE: draw_guide(); break;
+    case S_MENU:    draw_menu();    break;
+    case S_GUIDE:   draw_guide();   break;
+    case S_SUGAR:   draw_sugar();   break;
+    case S_MOOD:    draw_mood();    break;
+    case S_CI_DONE: draw_ci_done(); break;
+    case S_R_IDLE: case S_R_MSG: case S_R_DONE: draw_react(); break;
     default: break;
     }
 }
@@ -149,27 +467,115 @@ void astro_open(void)
     last_strip = timer_ticks();
 }
 
+static void to_menu(void) { st = S_MENU; dirty = 1; }
+
+static void start_wait(unsigned int now)
+{
+    r_wait_until = now + 150 + (rnd() % 251);      /* 1.5 .. 4.0 s */
+    st = S_R_WAIT;
+    dirty = 1;
+}
+
+static int median5(unsigned int *a)
+{
+    sort_u(a, REACT_TRIALS);
+    return (int)a[REACT_TRIALS / 2];
+}
+
 void astro_key(char c)
 {
+    unsigned int now = timer_ticks();      /* time of this key event (10 ms resolution) */
     if (st == S_CLOSED) return;
-    if (st == S_MENU) {
-        if (c == 27) { st = S_CLOSED; return; }
-        if (c == '1') { st = S_GUIDE; guide_page = 0; dirty = 1; }
+
+    if (st == S_R_GO) {
+        if (c == ' ') {
+            r_ms[r_trial++] = (now - r_go_tick) * 10u;
+            if (r_trial >= REACT_TRIALS) {
+                unsigned int t[REACT_TRIALS];
+                for (int k = 0; k < REACT_TRIALS; k++) t[k] = r_ms[k];
+                r_result = (unsigned int)median5(t);
+                chan_add(CH_REACT, r_result);
+                st = S_R_DONE;
+            } else {
+                st = S_R_IDLE;
+            }
+            dirty = 1;
+        } else if (c == 27) to_menu();
         return;
     }
-    if (st == S_GUIDE) {
-        if (c == 27) { st = S_MENU; dirty = 1; }
-        else if (c == 0x12 || c == 'n') { guide_page = (guide_page + 1) % GUIDE_PAGES; dirty = 1; }
+    if (st == S_R_WAIT) {
+        if (c == ' ') { r_early = 1; st = S_R_MSG; dirty = 1; }   /* pressed early: repeat this trial */
+        else if (c == 27) to_menu();
+        return;
+    }
+
+    if (c == 27) {
+        if (st == S_MENU) st = S_CLOSED;
+        else if (st == S_MOOD && sugar_saved) { to_menu(); }
+        else to_menu();
+        return;
+    }
+
+    switch (st) {
+    case S_MENU:
+        if (c == '1') { st = S_GUIDE; guide_page = 0; dirty = 1; }
+        else if (c == '2') { st = S_SUGAR; ilen = 0; sugar_saved = 0; dirty = 1; }
+        else if (c == '3') { st = S_R_IDLE; r_trial = 0; rng ^= now; dirty = 1; }
+        break;
+    case S_GUIDE:
+        if (c == 0x12 || c == 'n') { guide_page = (guide_page + 1) % GUIDE_PAGES; dirty = 1; }
         else if (c == 0x11 || c == 'p') { guide_page = (guide_page + GUIDE_PAGES - 1) % GUIDE_PAGES; dirty = 1; }
+        break;
+    case S_SUGAR:
+        if (c >= '0' && c <= '9' && ilen < 3) { ibuf[ilen++] = c; dirty = 1; }
+        else if (c == '\b' && ilen > 0) { ilen--; dirty = 1; }
+        else if (c == '\n') {
+            unsigned int v = 0;
+            for (unsigned int k = 0; k < ilen; k++) v = v * 10 + (unsigned int)(ibuf[k] - '0');
+            if (ilen > 0 && v > 0) {
+                chan_add(CH_SUGAR, v);
+                sugar_saved = v;
+                last_checkin = now;
+                st = S_MOOD; dirty = 1;
+            } else if (ilen == 0) {
+                sugar_saved = 0; st = S_MOOD; dirty = 1;    /* skip */
+            }
+        }
+        break;
+    case S_MOOD:
+        if (c >= '1' && c <= '5') {
+            chan_add(CH_MOOD, (unsigned int)(c - '0'));
+            last_checkin = now;
+            st = S_CI_DONE; dirty = 1;
+        }
+        break;
+    case S_R_IDLE:
+    case S_R_MSG:
+        if (c == ' ') start_wait(now);
+        break;
+    case S_R_DONE:
+        if (c == ' ') { st = S_R_IDLE; r_trial = 0; dirty = 1; }
+        break;
+    default: break;
     }
 }
 
 void astro_tick(unsigned int now)
 {
+    /* main-screen bookkeeping runs even when the console is closed */
+    int due = astro_checkin_due(now);
+    if (due != prev_due) { prev_due = due; main_dirty = 1; }
+    if ((now / 300) != prev_rot) { prev_rot = now / 300; main_dirty = 1; }
+
     if (st == S_CLOSED) return;
+    if (st == S_R_WAIT && now >= r_wait_until) {      /* screen turns green */
+        r_go_tick = now;
+        st = S_R_GO;
+        dirty = 1;
+    }
     if (now - last_strip >= 100) {            /* keep the simulated-vitals strip fresh */
         last_strip += 100;
-        draw_strip();
+        if (st != S_R_WAIT && st != S_R_GO) draw_strip();
     }
 }
 
@@ -180,12 +586,61 @@ void astro_draw(void)
     draw_all();
 }
 
-int astro_scrub(unsigned int now) { (void)now; return 0; }
-int astro_inject_fault(void) { return 0; }
-int astro_checkin_due(unsigned int now) { (void)now; return 0; }
+int astro_checkin_due(unsigned int now) { return now - last_checkin >= CHECKIN_INTERVAL_TICKS; }
+
 int astro_attention(unsigned int now, char *out, unsigned int cap, int *level)
 {
-    (void)now; (void)out; (void)cap; (void)level;
+    return attn_build(now, out, cap, level);
+}
+
+int astro_take_dirty(void) { int d = main_dirty; main_dirty = 0; return d; }
+
+/* ---- TMR: fault injection and scrubbing of the astronaut channels ---- */
+static const char *chname(int ch) { return chcfg[ch].name; }
+
+int astro_inject_fault(void)
+{
+    for (int tries = 0; tries < NCH; tries++) {
+        int ch = (inj_next + tries) % NCH;
+        if (cnt[ch] == 0) continue;
+        tmr_u32 *t = (base_set[ch] && (a_inj & 1)) ? &base_t[ch] : &ring[ch][(cnt[ch] - 1) % HIST];
+        tmr_inject(t, inj_copy, 0x80);
+        ser_str("AINJ,tick="); ser_num(timer_ticks());
+        ser_str(",chan="); ser_str(chname(ch));
+        ser_str(",copy="); { char cc[2] = { (char)('A' + inj_copy), 0 }; ser_str(cc); }
+        ser_str("\n");
+        inj_copy = (inj_copy + 1) % 3;
+        inj_next = (ch + 1) % NCH;
+        a_inj++;
+        main_dirty = 1;
+        return 1;
+    }
     return 0;
 }
-int astro_take_dirty(void) { return 0; }
+
+int astro_scrub(unsigned int now)
+{
+    int repaired = 0;
+    for (int ch = 0; ch < NCH; ch++) {
+        for (int i = 0; i < HIST + 2; i++) {
+            tmr_u32 *t = (i < HIST) ? &ring[ch][i] : (i == HIST ? &base_t[ch] : &best_t[ch]);
+            tmr_status s;
+            uint32_t good = tmr_read(t, &s);
+            if (s != TMR_OUTVOTED) continue;
+            for (int k = 0; k < 3; k++) {
+                if (t->c[k] != good) {
+                    ser_str("AEVT,tick="); ser_num(now);
+                    ser_str(",chan="); ser_str(chname(ch));
+                    ser_str(",copy="); { char cc[2] = { (char)('A' + k), 0 }; ser_str(cc); }
+                    ser_str(",bad="); ser_num(t->c[k]);
+                    ser_str(",good="); ser_num(good);
+                    ser_str(",repaired=1\n");
+                }
+            }
+            tmr_scrub(t);
+            repaired++; a_fix++;
+        }
+    }
+    if (repaired) dirty = dirty || (st == S_MENU || st == S_CI_DONE || st == S_R_DONE);
+    return repaired;
+}
