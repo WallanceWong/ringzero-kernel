@@ -2,6 +2,7 @@
 #include "io.h"
 #include "vigil.h"
 #include "replay_data.h"
+#include "astro.h"
 
 void fb_write_cell(unsigned int i, char c, unsigned char fg, unsigned char bg);
 void fb_clear(void);
@@ -155,7 +156,7 @@ static void draw_frame(void)
     panel(20,  478, 760,  82, "NEXT STEP");
 
     /* footer */
-    gfx_draw_string(20,  576, "TAB: fault    R: replay    X: 20 faults    F: freeze", C_DIM, C_BG);
+    gfx_draw_string(20,  576, "TAB: fault    R: replay    X: 20 faults    F: freeze    M: astronaut", C_DIM, C_BG);
     gfx_draw_string(620, 576, "ringzero-kernel i686", C_DIM, C_BG);
 }
 
@@ -230,6 +231,7 @@ static void draw_counts(void)                    /* kernel-computed totals */
 
 static void draw_event(void)
 {
+    if (astro_is_open()) return;                 /* console owns the screen */
     int copy;
     uint32_t bad, good;
     char num[4];
@@ -288,6 +290,7 @@ static void vit(unsigned int x, unsigned int y, const char *label, char kind, un
 
 static void draw_vitals(void)                           /* five vitals, only while idle */
 {
+    if (astro_is_open()) return;                 /* console owns the screen */
     gfx_fill_rect(422, 414, 356, 52, C_PANEL);
     vit(434, 418, "HR    ", 'h', sensor_hr,    0);
     vit(546, 418, "SPO2  ", 'o', sensor_spo2,  0);
@@ -298,6 +301,7 @@ static void draw_vitals(void)                           /* five vitals, only whi
 
 static void draw_replay(void)
 {
+    if (astro_is_open()) return;                 /* console owns the screen */
     gfx_fill_rect(422, 338, 356, 130, C_PANEL);
 
     if (!replay_on && !replay_done) {
@@ -339,6 +343,7 @@ static void draw_guidance(void)
 
 static void draw_status(void)
 {
+    if (astro_is_open()) return;                 /* console owns the screen */
     draw_level();
     draw_baseline();
     draw_event();
@@ -350,7 +355,7 @@ static void draw_status(void)
 int kmain(unsigned int *mbi)
 {
     unsigned int last_scrub = 0, last_blink = 0, fault_last = 0, replay_last = 0;
-    int banner_on = 0, blink_on = 0, fault_left = 0;
+    int banner_on = 0, blink_on = 0, fault_left = 0, console_was_open = 0;
 
     serial_init(0x3F8);
     gfx_init(mbi);
@@ -388,11 +393,24 @@ int kmain(unsigned int *mbi)
                 ser_str("FREEZE\n");
                 __asm__ volatile ("cli");
                 for (;;) __asm__ volatile ("hlt");
+            } else if (c == 'm' && !astro_is_open()) {         /* open the astronaut console */
+                astro_open();
+            } else if (astro_is_open()) {                     /* console owns the keyboard */
+                astro_key((char)c);
+            } else if (c == 27 || c == 0x11 || c == 0x12) {   /* Esc / arrows: ignored here */
             } else {
                 gfx_putc((char)c);
                 sensor_feed((char)c);
             }
         }
+
+        if (console_was_open && !astro_is_open()) {        /* console just closed: restore main screen */
+            draw_frame();
+            draw_status();
+        }
+        console_was_open = astro_is_open();
+        astro_tick(timer_ticks());
+        astro_draw();
 
         serial_poll();
 
