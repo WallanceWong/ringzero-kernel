@@ -78,8 +78,19 @@ The kernel analyses five vitals with the same protected-baseline design: heart r
 ## Evidence
 
 **Fault injection (real run, `fault.log`, summarised by `fault_table.py`):**
-- 20 faults injected, **20 corrected** (`fault.log`, re-measured on the astronaut-console build with the five vitals flowing; raw serial log in `fault_run_raw.log`).
-- Time from injection to repair: **480 to 980 ms, mean 730 ms** in this run. An earlier run on the submitted build gave 160 to 660 ms, mean 410 ms. Both are real; the repair time is the wait for the next 1 s scrub, so it depends on where the injection falls in the scrub cycle.
+- `fault.log` is one real 20-fault run (20 injected, **20 corrected**; raw serial log `fault_run_raw.log`). Its repair times are **480 to 980 ms, mean 730 ms**.
+- **Repair time is not one number.** The scrubber runs once per second, so a repair waits for the next scrub, and the time depends on where the injection lands in that 1 s cycle. We ran the 20-fault test five times, starting the run at different moments after boot. In every run all 20 faults were corrected, and the repair time ranged from about **50 to 980 ms** across the runs:
+
+| Run (key `x` sent after boot) | Corrected | Repair min / max / mean |
+|---|---|---|
+| 2.0 s | 20 of 20 | 50 / 550 / 300 ms |
+| 2.4 s | 20 of 20 | 160 / 660 / 410 ms |
+| 2.8 s | 20 of 20 | 290 / 790 / 540 ms |
+| 3.2 s | 20 of 20 | 380 / 880 / 630 ms |
+| `fault.log` run | 20 of 20 | 480 / 980 / 730 ms |
+
+- Raw serial logs for the four timed runs are in `fault_sweep_raw.log`, so every number can be re-checked with `fault_table.py`. A first 2.0 s attempt was discarded as incomplete (the log was copied too early and held only 4 of 20 faults); it is kept at the end of that file, labelled. The 2.0 s row is from the complete re-run.
+- Within one run the faults alternate between two repair times about 500 ms apart, because they are injected 1.5 s apart against a 1 s scrub. We do not quote any single mean as "the" repair time.
 - Faults were injected at a fixed 1.5 s spacing, so this run does not sample every possible timing against the 1 s scrub cycle.
 
 **8-week replay (simulated, `gen_replay.py`):**
