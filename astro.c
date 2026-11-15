@@ -74,7 +74,9 @@ static int          main_dirty = 0;
 
 typedef enum {
     S_CLOSED, S_MENU, S_GUIDE, S_SUGAR, S_MOOD, S_CI_DONE,
-    S_R_IDLE, S_R_WAIT, S_R_GO, S_R_MSG, S_R_DONE
+    S_R_IDLE, S_R_WAIT, S_R_GO, S_R_MSG, S_R_DONE,
+    S_M_IDLE, S_M_SHOW, S_M_INPUT, S_M_DONE,
+    S_Q_IDLE, S_Q, S_Q_DONE
 } astate_t;
 
 /* ---- small text helpers (no printf in this kernel) ---- */
@@ -202,6 +204,15 @@ static int          r_early = 0;
 static int          prev_due = 0;
 static unsigned int prev_rot = 0;
 static unsigned int sugar_saved = 0;
+/* memory test */
+static unsigned char m_seq[MEM_MAX];
+static unsigned int  m_len = 1, m_pos = 0, m_show_i = 0, m_until = 0, m_longest = 0;
+static int           m_lit = -1;
+/* mental math */
+static unsigned int  q_i = 0, q_a = 0, q_b = 0, q_score = 0;
+static char          q_op = '+';
+static int           q_last = 0;            /* 0 none, 1 correct, 2 wrong */
+static unsigned int  q_last_ans = 0;
 
 static unsigned int rnd(void)       /* LCG, seeded from PIT ticks at test start */
 {
@@ -320,8 +331,8 @@ static void draw_menu(void)
     gfx_draw_string_scaled(40, 144, "1  Health guide", C_TXT, C_BG, 2);
     gfx_draw_string_scaled(40, 174, "2  Check-in (blood sugar, mood)", C_TXT, C_BG, 2);
     gfx_draw_string_scaled(40, 204, "3  Reaction test", C_TXT, C_BG, 2);
-    gfx_draw_string_scaled(40, 234, "4  Memory test  (soon)", C_DIM, C_BG, 2);
-    gfx_draw_string_scaled(40, 264, "5  Mental math  (soon)", C_DIM, C_BG, 2);
+    gfx_draw_string_scaled(40, 234, "4  Memory test", C_TXT, C_BG, 2);
+    gfx_draw_string_scaled(40, 264, "5  Mental math", C_TXT, C_BG, 2);
     draw_table(304, 0, NCH);
     b[0] = 0;
     put_str(b, &n, "Sessions completed this boot: ");
@@ -366,7 +377,7 @@ static void draw_sugar(void)
     b[ilen] = '_'; b[ilen + 1] = 0;
     gfx_draw_string_scaled(40, 230, b, C_TXT, C_BG, 5);
     gfx_draw_string_scaled(300, 250, "mg/dL", C_DIM, C_BG, 2);
-    draw_footer("0-9: type    Backspace: fix    Enter: save    Esc: menu");
+    draw_footer("0-9 type  Bksp fix  Enter save  Esc menu");
 }
 
 static void draw_mood(void)
@@ -440,6 +451,84 @@ static void draw_react(void)
     draw_footer(st == S_R_DONE ? "Space: run again    Esc: menu" : "Space: continue    Esc: menu");
 }
 
+static void draw_pad(void)
+{
+    static const unsigned int dim[4] = { 0x00601818u, 0x00186018u, 0x00181860u, 0x00606018u };
+    static const unsigned int lit[4] = { 0x00FF4040u, 0x0040FF40u, 0x004060FFu, 0x00FFFF40u };
+    for (int k = 0; k < 4; k++) {
+        char d[2] = { (char)('1' + k), 0 };
+        unsigned int x = 250 + (unsigned int)(k % 2) * 160, y = 330 + (unsigned int)(k / 2) * 120;
+        gfx_fill_rect(x, y, 140, 100, m_lit == k ? lit[k] : dim[k]);
+        gfx_draw_string_scaled(x + 56, y + 34, d, C_TXT, m_lit == k ? lit[k] : dim[k], 4);
+    }
+}
+
+static void draw_mem(void)
+{
+    char b[64]; unsigned int n = 0;
+    gfx_draw_string(20, 124, "MEMORY TEST  (MEASURED from you)", C_ACC, C_BG);
+    if (st == S_M_IDLE) {
+        gfx_draw_string_scaled(20, 156, "Press SPACE to start", C_TXT, C_BG, 2);
+        draw_wrapped(20, 200, "Watch the colour pads light up. Then repeat the order with keys 1-4. The sequence grows by one each round. Your result is the longest sequence you repeat correctly.", 94, C_DIM, C_BG, 18);
+        draw_footer("Space: start    Esc: menu");
+        return;
+    }
+    if (st == S_M_DONE) {
+        gfx_draw_string_scaled(20, 156, "SESSION DONE", C_OK, C_BG, 3);
+        put_str(b, &n, "Longest correct sequence: "); put_num(b, &n, m_longest);
+        gfx_draw_string_scaled(20, 210, b, C_TXT, C_BG, 2);
+        draw_table(260, CH_MEM, CH_MEM + 1);
+        draw_attention(330);
+        draw_footer("Space: run again    Esc: menu");
+        return;
+    }
+    put_str(b, &n, "Sequence length "); put_num(b, &n, m_len);
+    gfx_draw_string_scaled(20, 156, b, C_TXT, C_BG, 2);
+    n = 0; b[0] = 0;
+    if (st == S_M_SHOW) put_str(b, &n, "Watch...");
+    else { put_str(b, &n, "Your turn: "); put_num(b, &n, m_pos); put_str(b, &n, " of "); put_num(b, &n, m_len); }
+    gfx_draw_string_scaled(20, 200, b, st == S_M_SHOW ? C_AMBER : C_OK, C_BG, 2);
+    draw_pad();
+    draw_footer("1-4: repeat the order    Esc: menu");
+}
+
+static void draw_math(void)
+{
+    char b[64]; unsigned int n = 0;
+    gfx_draw_string(20, 124, "MENTAL MATH  (MEASURED from you)", C_ACC, C_BG);
+    if (st == S_Q_IDLE) {
+        gfx_draw_string_scaled(20, 156, "Press SPACE to start", C_TXT, C_BG, 2);
+        draw_wrapped(20, 200, "5 simple questions (+, -, x). Type each answer and press Enter. Your result is the number correct.", 94, C_DIM, C_BG, 18);
+        draw_footer("Space: start    Esc: menu");
+        return;
+    }
+    if (st == S_Q_DONE) {
+        gfx_draw_string_scaled(20, 156, "SESSION DONE", C_OK, C_BG, 3);
+        put_str(b, &n, "Correct: "); put_num(b, &n, q_score); put_str(b, &n, " of 5");
+        gfx_draw_string_scaled(20, 210, b, C_TXT, C_BG, 2);
+        draw_table(260, CH_MATH, CH_MATH + 1);
+        draw_attention(330);
+        draw_footer("Space: run again    Esc: menu");
+        return;
+    }
+    put_str(b, &n, "Question "); put_num(b, &n, q_i + 1); put_str(b, &n, " of 5");
+    gfx_draw_string(20, 150, b, C_DIM, C_BG);
+    n = 0; b[0] = 0;
+    put_num(b, &n, q_a); put_str(b, &n, " "); b[n++] = q_op; b[n] = 0; put_str(b, &n, " "); put_num(b, &n, q_b); put_str(b, &n, " = ?");
+    gfx_draw_string_scaled(40, 190, b, C_TXT, C_BG, 5);
+    n = 0; b[0] = 0;
+    for (unsigned int k = 0; k < ilen; k++) b[n++] = ibuf[k];
+    b[n++] = '_'; b[n] = 0;
+    gfx_draw_string_scaled(40, 290, b, C_ACC, C_BG, 5);
+    if (q_last == 1) gfx_draw_string(40, 400, "Previous answer: correct", C_OK, C_BG);
+    else if (q_last == 2) {
+        n = 0; b[0] = 0;
+        put_str(b, &n, "Previous answer: wrong (it was "); put_num(b, &n, q_last_ans); put_str(b, &n, ")");
+        gfx_draw_string(40, 400, b, C_FAULT, C_BG);
+    }
+    draw_footer("0-9 type  Bksp fix  Enter answer  Esc menu");
+}
+
 static void draw_all(void)
 {
     if (st == S_R_WAIT || st == S_R_GO) { draw_react(); return; }
@@ -453,6 +542,8 @@ static void draw_all(void)
     case S_MOOD:    draw_mood();    break;
     case S_CI_DONE: draw_ci_done(); break;
     case S_R_IDLE: case S_R_MSG: case S_R_DONE: draw_react(); break;
+    case S_M_IDLE: case S_M_SHOW: case S_M_INPUT: case S_M_DONE: draw_mem(); break;
+    case S_Q_IDLE: case S_Q: case S_Q_DONE: draw_math(); break;
     default: break;
     }
 }
@@ -480,6 +571,21 @@ static int median5(unsigned int *a)
 {
     sort_u(a, REACT_TRIALS);
     return (int)a[REACT_TRIALS / 2];
+}
+
+static void mem_start_show(unsigned int now)
+{
+    st = S_M_SHOW; m_show_i = 0; m_lit = -1; m_until = now + 60; dirty = 1;
+}
+
+static void q_next(void)
+{
+    q_a = 0; q_b = 0;
+    unsigned int o = rnd() % 3;
+    if (o == 0)      { q_op = '+'; q_a = 1 + rnd() % 20; q_b = 1 + rnd() % 20; }
+    else if (o == 1) { q_op = '-'; q_a = 1 + rnd() % 20; q_b = 1 + rnd() % q_a; }
+    else             { q_op = 'x'; q_a = 2 + rnd() % 8;  q_b = 2 + rnd() % 8; }
+    ilen = 0;
 }
 
 void astro_key(char c)
@@ -521,6 +627,8 @@ void astro_key(char c)
         if (c == '1') { st = S_GUIDE; guide_page = 0; dirty = 1; }
         else if (c == '2') { st = S_SUGAR; ilen = 0; sugar_saved = 0; dirty = 1; }
         else if (c == '3') { st = S_R_IDLE; r_trial = 0; rng ^= now; dirty = 1; }
+        else if (c == '4') { st = S_M_IDLE; rng ^= now; dirty = 1; }
+        else if (c == '5') { st = S_Q_IDLE; rng ^= now; dirty = 1; }
         break;
     case S_GUIDE:
         if (c == 0x12 || c == 'n') { guide_page = (guide_page + 1) % GUIDE_PAGES; dirty = 1; }
@@ -556,6 +664,47 @@ void astro_key(char c)
     case S_R_DONE:
         if (c == ' ') { st = S_R_IDLE; r_trial = 0; dirty = 1; }
         break;
+    case S_M_IDLE:
+    case S_M_DONE:
+        if (c == ' ') {
+            for (int k = 0; k < MEM_MAX; k++) m_seq[k] = (unsigned char)(rnd() % 4);
+            m_len = 1; m_longest = 0;
+            mem_start_show(now);
+        }
+        break;
+    case S_M_INPUT:
+        if (c >= '1' && c <= '4') {
+            if ((unsigned int)(c - '1') == m_seq[m_pos]) {
+                m_pos++;
+                if (m_pos >= m_len) {
+                    m_longest = m_len;
+                    if (m_len >= MEM_MAX) { chan_add(CH_MEM, m_longest); st = S_M_DONE; dirty = 1; }
+                    else { m_len++; mem_start_show(now); }
+                } else dirty = 1;
+            } else {                                          /* wrong: session over */
+                chan_add(CH_MEM, m_longest);
+                st = S_M_DONE; dirty = 1;
+            }
+        }
+        break;
+    case S_Q_IDLE:
+    case S_Q_DONE:
+        if (c == ' ') { st = S_Q; q_i = 0; q_score = 0; q_last = 0; q_next(); dirty = 1; }
+        break;
+    case S_Q:
+        if (c >= '0' && c <= '9' && ilen < 3) { ibuf[ilen++] = c; dirty = 1; }
+        else if (c == '\b' && ilen > 0) { ilen--; dirty = 1; }
+        else if (c == '\n' && ilen > 0) {
+            unsigned int v = 0;
+            for (unsigned int k = 0; k < ilen; k++) v = v * 10 + (unsigned int)(ibuf[k] - '0');
+            unsigned int ans = q_op == '+' ? q_a + q_b : q_op == '-' ? q_a - q_b : q_a * q_b;
+            if (v == ans) { q_score++; q_last = 1; } else { q_last = 2; q_last_ans = ans; }
+            q_i++;
+            if (q_i >= MATH_QUESTIONS) { chan_add(CH_MATH, q_score); st = S_Q_DONE; }
+            else q_next();
+            dirty = 1;
+        }
+        break;
     default: break;
     }
 }
@@ -572,6 +721,14 @@ void astro_tick(unsigned int now)
         r_go_tick = now;
         st = S_R_GO;
         dirty = 1;
+    }
+    if (st == S_M_SHOW && now >= m_until) {           /* memory playback: lit 0.5 s, gap 0.2 s */
+        if (m_lit < 0) {
+            if (m_show_i < m_len) { m_lit = m_seq[m_show_i]; m_until = now + 50; draw_pad(); }
+            else { st = S_M_INPUT; m_pos = 0; dirty = 1; }
+        } else {
+            m_lit = -1; m_show_i++; m_until = now + 20; draw_pad();
+        }
     }
     if (now - last_strip >= 100) {            /* keep the simulated-vitals strip fresh */
         last_strip += 100;
