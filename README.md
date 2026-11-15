@@ -1,12 +1,15 @@
-
 # A1-37 VIGIL
 
 **A fault-tolerant crew health monitor that runs on its own bare-metal kernel.**
 Team CHS Ring Zero, Catholic High School Sibu. Sarawak Space Challenge 2026 (NASA Space Apps), Junior category.
 
+**Challenge:** *Create Health Monitoring Software for Astronauts on Space Missions* (NASA Space Apps 2026).
+
 > **Read this first.** All vital signs in this project are **SIMULATED**. There is no sensor hardware in the submission. The screen shows a permanent "VITALS: SIMULATED" badge, and the 8-week replay is labelled SIMULATED too. What is real is the kernel, the fault-tolerance mechanism, and the measured repair times.
 
-**Demo video (30 s):** TODO(team): paste the YouTube link here
+**Demo video (30 s):** https://youtu.be/_Nj1hWAB3Fg
+
+The video is a real screen capture of the kernel in QEMU and of the Ground Station. It was cut and captioned with AI assistance, and its sound effects are generated tones.
 
 ---
 
@@ -16,53 +19,73 @@ NASA's Human Research Program groups the risks of human spaceflight into five ha
 
 - **Distance from Earth.** The further a crew travels, the harder it is to get help, supplies and instructions from Earth. A crew health monitor has to keep working without a ground team looking over its shoulder.
 - **Space radiation.** NASA lists it among the most hazardous aspects of spaceflight. Our own engineering reasoning (not a NASA claim) is that radiation can flip bits in computer memory, so a health monitor that stores a baseline in memory could quietly learn a wrong "normal".
+
 VIGIL learns a crew member's resting baseline, protects it against memory corruption, and warns early when a sustained drift appears.
+
+## How VIGIL answers the challenge
+
+The challenge asks for software that gathers health indicators and lets astronauts evaluate and act on their own health.
+
+| The challenge asks for | What VIGIL does |
+|---|---|
+| Gather health indicators | Reads five vitals over a simple serial protocol: heart rate, SpO2, body temperature, systolic blood pressure and sleep hours. Four of them are on the challenge's own list. The source is simulated. |
+| Astronauts must spot changes in themselves | Learns each crew member's own baseline and looks for a sustained drift away from it, not a one-off reading. |
+| Colour coding at a glance | One large GREEN / AMBER / RED status. Each vital is also coloured by its own level. |
+| Guidance on what to do | A plain "next step" line for each level, for example "Rest, hydrate, re-measure within 24 hours". |
+| Charts that show change over time | The Ground Station plots every vital for the last 60 s and since it connected. |
+| When should the ground pay attention | The Ground Station shows the link state, the fault counters and the alert. |
+| Hazard: space radiation | Each baseline is stored three times and repaired by majority vote, so one corrupted copy cannot change the result. |
+| Hazard: distance from Earth | The monitor is a stand-alone kernel. It reaches its alert without any ground link. |
+
+**Not covered yet:** blood sugar and mood, readings typed in by the astronaut, and longer explanations of each vital. See Limits.
 
 ## NASA and agency resources used
 
 - NASA Human Research Program, *5 Hazards of Human Spaceflight*: https://www.nasa.gov/hrp/hazards
 - NASA Human Research Program, *Risks of Human Spaceflight*: https://www.nasa.gov/hrp/risks
 - Canadian Space Agency, *Monitoring radiation for astronaut health* (26 Feb 2026): https://www.asc-csa.gc.ca/eng/news/articles/2026/2026-02-26-monitoring-radiation-astronaut-health.asp
+
 We used these for the problem framing only. No NASA data, logos or images are used in the project.
 
 ## What it does
 
 | Part | What it does |
 |---|---|
-| Baseline | Learns the mean of the first 10 heart-rate samples, then locks it. |
-| Triple copy (software TMR) | Stores three copies of the baseline and takes a bitwise majority vote. |
+| Baseline | Learns the mean of the first 10 samples of each of five vitals (heart rate, SpO2, temperature, systolic blood pressure, sleep), then locks it. |
+| Triple copy (software TMR) | Stores three copies of each baseline and takes a bitwise majority vote. |
 | Scrubber | Once per second, checks the three copies and repairs a disagreeing one. |
-| Drift detector | Compares the median of the last 7 readings with the baseline. Levels: GREEN, AMBER, RED. |
+| Drift detector | Compares each vital with its baseline (heart rate uses the median of the last 7 readings). Levels: GREEN, AMBER, RED. The worst vital sets the screen level. |
 | Next step | AMBER: "Rest, hydrate, re-measure within 24 hours". RED: "Contact the flight surgeon". GREEN: "Continue routine monitoring". |
 | Heartbeat | A square on screen toggles every 0.25 s. If the kernel freezes, it stops. |
+| Counters | The screen shows INJECTED and FIXED totals, counted by the kernel. |
 | Serial telemetry | The kernel logs `INJ`, `EVT`, `REPLAY`, `RUN`, `FREEZE` lines on COM1. |
 
 The screen is 800×600 and has panels for the protected baseline, status, fault monitor, 8-week replay and next step.
 
-**Thresholds are demo values, not clinical values.** Heart rate: 10 % drift = AMBER, 25 % = RED, sustained for 3 readings.
+**Thresholds are demo values, not clinical values.** All sustained for 3 readings. Heart rate: +10 % AMBER, +25 % RED. SpO2: -3 % AMBER, -6 % RED. Temperature: +0.8 C AMBER, +1.5 C RED. Systolic blood pressure: +10 % AMBER, +20 % RED. Sleep: -15 % AMBER, -30 % RED.
 
 ## What is real and what is simulated
 
 | Real | Simulated |
 |---|---|
-| The bare-metal i686 kernel (boots from GRUB, own drivers) | Every vital sign (heart rate, SpO2, temperature) |
+| The bare-metal i686 kernel (boots from GRUB, own drivers) | Every vital sign (heart rate, SpO2, temperature, blood pressure, sleep) |
 | The triple-copy vote and scrubber | The 8-week replay data (`gen_replay.py`, seed 37) |
 | The fault injection (a bit flipped in one copy) | The "radiation" upset. It is a software bit flip, not a radiation test. |
 | The measured repair times | |
 
-Heart rate is the vital the system actually analyses. SpO2 and temperature are fed in as steady simulated values. Sleep and blood pressure are **future work**.
+The kernel analyses five vitals with the same protected-baseline design: heart rate, SpO2, temperature, systolic blood pressure and sleep. All values are simulated and nearly steady. Only the heart-rate baseline receives the injected faults, and only heart rate is used in the 8-week replay.
 
 ## Evidence
 
 **Fault injection (real run, `fault.log`, summarised by `fault_table.py`):**
-- 20 faults injected, **20 corrected**.
+- 20 faults injected, **20 corrected**. This run was measured before the blood pressure and sleep channels and the on-screen counters were added; the fault path (the heart-rate baseline) was not changed.
 - Time from injection to repair: **160 to 660 ms, mean 410 ms**.
 - Faults were injected at a fixed 1.5 s spacing, so this run does not sample every possible timing against the 1 s scrub cycle.
+
 **8-week replay (simulated, `gen_replay.py`):**
 - 56 daily resting heart-rate values, baseline 63.
 - Rule: 7-day rolling median at least 10 % above baseline for 3 consecutive days. The same rule runs in the kernel, the Ground Station dashboard and the script.
 - Result: **AMBER on day 47**. The kernel's final median is 77, which is +22 % (AMBER, below the RED threshold of 25 %).
-**Bare-metal proof:** TODO(team): add the Dell boot photo here (check there are no faces or reflections of faces)
 
 ## Run it
 
@@ -77,10 +100,10 @@ This builds `os.iso` and opens it in QEMU. The kernel needs no input to run, but
 **Feed simulated vitals (second terminal setup):**
 
 ```
-nix-shell -p qemu --run 'qemu-system-i386 -cdrom os.iso -serial pty > /tmp/q.out 2>&1 & Q=$!; sleep 4; P=$(grep -o "/dev/pts/[0-9]*" /tmp/q.out | head -1); echo "serial port: $P"; python3 sim_vitals.py "$P"; kill $Q'
+nix-shell -p qemu --run 'qemu-system-i386 -cdrom os.iso -serial pty > /tmp/q.out 2>&1 & Q=$!; sleep 4; P=$(grep -o "/dev/pts/[0-9]*" /tmp/q.out | head -1); echo "serial port: $P"; python3 bridge.py "$P"; kill $Q'
 ```
 
-This starts QEMU, finds the serial port, and runs `sim_vitals.py`, which sends one simulated reading per second.
+This starts QEMU, finds the serial port, and runs `bridge.py`, which sends one set of simulated readings per second and serves the kernel's own telemetry to the Ground Station on 127.0.0.1:8037.
 
 **Keys (click the QEMU window first):**
 
@@ -92,31 +115,45 @@ This starts QEMU, finds the serial port, and runs `sim_vitals.py`, which sends o
 | G | Debug: instantly lock the baseline at 72 |
 | F | Freeze the kernel (the heartbeat square stops) |
 
+## Ground Station
+
+`ground_station/ground_station.html` is a browser dashboard designed by Kayla. Run `python3 bridge.py` (see Run it), then open the file in a browser.
+
+- **Live from the kernel:** the faults-injected and repaired counts, the event lines, and the start of the replay come from the kernel's serial telemetry.
+- **Live from the simulator:** the five vital values and their charts show what the simulator sent to the kernel. They are SIMULATED.
+- **Replay:** when the kernel starts its 8-week replay, the dashboard runs the same rule on the same 56 simulated values and shows AMBER at day 47. The kernel does not send per-day data over serial, so this part is a recomputation, not a live feed.
+- Without the bridge the page says NOT CONNECTED.
+- Reload the page after you restart the kernel. An open page keeps the alert badge from the previous run.
+- The page needs no internet: Chart.js is bundled as `ground_station/chart.umd.js`.
+
 ## Limits (honest list)
 
-- Only the three baseline copies are protected. The rest of the kernel is not.
+- Only the stored baselines (three copies each) are protected. The rest of the kernel is not. Fault injection and the 20 of 20 evidence cover the heart-rate baseline only.
 - Two corruptions of the same bit in two copies inside one scrub window would defeat the vote.
 - The fault is simulated. We did not test with real radiation.
 - We call it **fault-tolerant**. We do not claim it is radiation-proof.
 - Thresholds are demo values, not medical advice.
 - All vitals are simulated. We have not validated it on a person.
+- Blood sugar and mood, which the challenge lists, are not implemented.
+- The astronaut cannot type in a reading yet. Vitals arrive over the serial protocol only.
+- The advice is one short line per level. It does not explain the vital or the hazard behind it.
+
 ## Input protocol
 
-The kernel reads 4-character lines on COM1 (115200 baud): `h072` heart rate, `o098` SpO2, `t366` temperature ×10, `b1` inject a fault.
+The kernel reads 4-character lines on COM1 (115200 baud): `h072` heart rate, `o098` SpO2, `t366` temperature ×10, `p120` systolic blood pressure, `s075` sleep in tenths of an hour, `b1` inject a fault. There is no sensor hardware in the submission.
 
 ## AI use disclosure
 
-Claude (Anthropic) wrote most of the kernel code from the start of the hackathon, plus the Python scripts and the first draft of this README. The team designed the project, directed the work, built, tested and verified every claim, and ran all measurements. Commit history shows what existed before the hackathon (tag `pre-hackathon`). TODO(team): one sentence on what existed before the hackathon.
+Claude (Anthropic) wrote most of the kernel code from the start of the hackathon, plus the Python scripts (including `bridge.py`), the live wiring of the Ground Station, and the first draft of this README. Kayla designed the Ground Station layout; Claude rewired it to live data. The team designed the project, directed the work, built, tested and verified every claim, and ran all measurements. Claude also cut and captioned the demo video from the team's own screen recordings and generated its sound effects. The tag `pre-hackathon` marks the repository as it was before the hackathon started; the commit history after that tag is the hackathon work.
 
 ## Team
 
 - **Wallance Wong**: kernel, fault tolerance, integration
-- **Kayla Wee**: Ground Station web dashboard
+- **Kayla Wee**: Ground Station web dashboard (design)
 - **Nathania Chua**: proofreading and filming support
 - Advisor: Mr. Wong Qing Hao
-TODO(team): confirm names and roles are as you want them shown.
 
 ## Credits
 
-Font: DejaVu Sans Mono Bold (see `FONT-LICENSE.txt`).
-
+- Font: DejaVu Sans Mono Bold (see `FONT-LICENSE.txt`).
+- Charts: Chart.js 4.4.0, MIT licence, bundled in `ground_station/`.

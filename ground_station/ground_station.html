@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -32,7 +32,7 @@
             font-weight: bold;
         }
 
-        /* 四大模块网格布局：2行2列 */
+        /* Panel grid layout: 2 columns */
         .dashboard-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -43,7 +43,7 @@
         .linkbar { margin-bottom:10px; font-size:13px; color:#8899a6; }
         .linkbar b { color:#e0e0e0; }
 
-        /* 每个指标的独立模块 */
+        /* One panel per vital */
         .metric-panel {
             background-color: #111a28;
             border: 1px solid #1f334a;
@@ -62,7 +62,7 @@
         .metric-title { font-size: 18px; color: #fff; }
         .metric-value { font-size: 28px; font-weight: bold; color: #00ffcc; text-shadow: 0 0 10px #00ffcc;}
 
-        /* 每个模块里的图表容器 */
+        /* Chart container inside each panel */
         .chart-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -83,6 +83,7 @@
             color: #8899a6;
             z-index: 10;
         }
+        .chart-box, .metric-panel { min-width: 0; }   /* let charts shrink in a narrow window */
     </style>
 </head>
 <body>
@@ -97,10 +98,10 @@
     <div class="linkbar">KERNEL LINK: <b id="link">NOT CONNECTED</b> &nbsp;|&nbsp; faults injected: <b id="kinj">-</b> &nbsp;|&nbsp; repaired: <b id="kfix">-</b> &nbsp;|&nbsp; all vitals are simulated and sent to the kernel by bridge.py</div>
 
     <div class="dashboard-grid">
-        <!-- 模块 1：心率 -->
+        <!-- Panel 1: Heart Rate -->
         <div class="metric-panel">
             <div class="metric-header">
-                <div class="metric-title">❤️ 心率 Heart Rate</div>
+                <div class="metric-title">❤️ Heart Rate</div>
                 <div class="metric-value"><span id="hr-val">--</span> <span style="font-size:14px;">BPM</span></div>
             </div>
             <div class="chart-row">
@@ -115,10 +116,10 @@
             </div>
         </div>
 
-        <!-- 模块 2：血氧 -->
+        <!-- Panel 2: SpO2 -->
         <div class="metric-panel">
             <div class="metric-header">
-                <div class="metric-title">🫁 血氧 SpO2</div>
+                <div class="metric-title">🫁 SpO2</div>
                 <div class="metric-value"><span id="spo2-val">--</span> <span style="font-size:14px;">%</span></div>
             </div>
             <div class="chart-row">
@@ -133,10 +134,10 @@
             </div>
         </div>
 
-        <!-- 模块 3：血压 -->
+        <!-- Panel 3: Blood Pressure -->
         <div class="metric-panel">
             <div class="metric-header">
-                <div class="metric-title">🩸 血压 Blood Pressure</div>
+                <div class="metric-title">🩸 Blood Pressure</div>
                 <div class="metric-value"><span id="bp-val">--</span> <span style="font-size:14px;">mmHg</span></div>
             </div>
             <div class="chart-row">
@@ -151,10 +152,10 @@
             </div>
         </div>
 
-        <!-- 模块 4：体温 -->
+        <!-- Panel 4: Temperature -->
         <div class="metric-panel">
             <div class="metric-header">
-                <div class="metric-title">🌡️ 体温 Temperature </div>
+                <div class="metric-title">🌡️ Temperature </div>
                 <div class="metric-value"><span id="temp-val">--</span> <span style="font-size:14px;">°C</span></div>
             </div>
             <div class="chart-row">
@@ -170,10 +171,10 @@
         </div>
     </div>
 
-    <!-- 模块5: 睡眠 -->
+    <!-- Panel 5: Sleep -->
     <div class="metric-panel">
         <div class="metric-header">
-            <div class="metric-title"> 😴睡眠 Sleep</div>
+            <div class="metric-title"> 😴 Sleep</div>
             <div class="metric-value"><span id="sleep-val">--</span> <span style="font-size:14px;">hours</span></div>
         </div>
         <div class="chart-row">
@@ -189,28 +190,28 @@
     </div>
 
     <script>
-        // 通用图表配置
+        // Shared chart options
         const commonOptions = {
             responsive: true,
             maintainAspectRatio: false,
             animation: false,
             plugins: { legend: { display: false } },
             scales: {
-                x: { display: false }, // 隐藏X轴标签，省空间
+                x: { display: false }, // hide x-axis labels to save space
                 y: { 
                     grid: { color: '#1f334a' }, 
                     ticks: { color: '#8899a6', font: {size: 9} } 
                 }
             },
-            elements: { point: { radius: 0 } } // 隐藏数据点，看起来更平滑
+            elements: { point: { radius: 0 } } // hide data points for a smoother line
         };
 
-        // 颜色定义
+        // Colours
         const colors = {
             hr: '#ff4d4d', spo2: '#00ffcc', bp: '#ff9800', temp: '#4d94ff', sleep: '#9c27b0'
         };
 
-        // 构造函数：生成图表（数据由内核实时推送）
+        // Build one chart (values arrive through bridge.py)
         function createChart(id, color) {
             const ctx = document.getElementById(id).getContext('2d');
             return new Chart(ctx, {
@@ -241,12 +242,12 @@
         for (const k in RNG) { for (const c of C[k]) { c.options.scales.y.min = RNG[k][0]; c.options.scales.y.max = RNG[k][1]; c.update('none'); } }
         function pushAll(k, v) { feedChart(C[k][0], v, MAXS); feedChart(C[k][1], v, MAXL); }
 
-        // 状态徽章 + 内核实时链接（bridge.py -> 127.0.0.1:8037）
+        // Status badge + live kernel link (bridge.py -> 127.0.0.1:8037)
         const sb = document.getElementById('sys-status');
         function badge(text, color) { sb.innerText = text; sb.style.color = color; sb.style.borderColor = color; }
         let connected = false, frozen = false, alertText = null;
 
-        // 8周模拟回放：和内核、gen_replay.py 完全相同的规则（7天滚动中位数 >= 基线+10%，连续3天）
+        // 8-week simulated replay: same rule as the kernel and gen_replay.py (7-day rolling median >= baseline +10% for 3 consecutive days)
         const BASE = 63;
         function med(a) { const t = a.slice().sort((x, y) => x - y); return t[Math.floor(t.length / 2)]; }
         let rtimer = null;
